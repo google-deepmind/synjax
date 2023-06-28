@@ -1,0 +1,7 @@
+numba>=0.53.1
+numpy>=1.18.0
+opt_einsum
+optax>=0.0.1
+jaxtyping>=0.2.14
+typeguard>=2.13.3
+equinox>=0.1.3
