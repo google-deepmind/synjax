@@ -26,7 +26,7 @@ from synjax._src.utils import semirings
 import typeguard
 
 
-class AlignmentCRF(SemiringDistribution):
+class GeneralMonotoneAlignmentCRF(SemiringDistribution):
   """Distribution of monotone alignments between elements of two sequences.
 
   It is similar to String-Edit Distance CRF from McCallum et al (2005),
@@ -82,6 +82,10 @@ class AlignmentCRF(SemiringDistribution):
       raise typeguard.TypeCheckError(
           "Arguments log-potentials must have the same shape.")
     rows, cols = log_potentials_horizontal[0].shape[-2:]
+    if (log_potentials_vertical is None and lengths_cols is None
+        and lengths_rows is None and rows >= cols):
+      raise ValueError("This is a useless distribution because there is "
+                       "less than two alignment possible.")
     batch_shape = log_potentials_horizontal[0].shape[:-2]
     if lengths_rows is None:
       lengths_rows = jnp.full(batch_shape, rows)
@@ -106,7 +110,7 @@ class AlignmentCRF(SemiringDistribution):
     lp, lp_vert = self._masked_params()
     scores = jnp.zeros(event.shape[:-2])
     if lp_vert is not None:
-      is_vertical = event * jnp.roll(event, 1, -2)
+      is_vertical = (event * jnp.roll(event, 1, -2)).at[..., 0, :].set(0)
       scores += jnp.sum(lp_vert * is_vertical, (-1, -2))
     event_leaving = (jnp.argmax(jnp.cumsum(event, -2), -2, keepdims=True)
                      == jnp.arange(event.shape[-2])[:, None]).astype(jnp.int32)
@@ -162,3 +166,4 @@ class AlignmentCRF(SemiringDistribution):
     if lp_v is not None:
       lp_v = lp_v.at[..., 0, :].set(-INF)
     return lp_h, lp_v
+

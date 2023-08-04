@@ -31,7 +31,6 @@ from synjax._src.utils.semirings import Semiring, MaxSemiring
 
 
 Chart = chart_struct.Chart
-AlgorithmName = Literal["Kuhlmann", "Eisner"]
 
 
 class SpanningTreeProjectiveCRF(SemiringDistribution):
@@ -59,17 +58,24 @@ class SpanningTreeProjectiveCRF(SemiringDistribution):
   @typed
   def _structure_forward(
       self, base_struct: Float[Array, "n n"], semiring: Semiring, key: Key,
-      algorithm: Optional[AlgorithmName] = None) -> Float[Array, "s"]:
-    if (algorithm is None and isinstance(semiring, MaxSemiring)) or (
-        algorithm == "Kuhlmann"):
-      if not isinstance(semiring, MaxSemiring):
-        warnings.warn(
-            "Kuhlmann's arc-hybrid algorithm does not provide correct results"
-            " for any semiring except MaxSemiring due to spurious ambiguity.")
+      algorithm: Optional[Literal["Kuhlmann", "Eisner"]] = None
+      ) -> Float[Array, "s"]:
+    if algorithm is None:
+      if isinstance(semiring, MaxSemiring):
+        algorithm = get_config().projective_argmax_algorithm
+      else:
+        algorithm = "Eisner"
+
+    if algorithm == "Kuhlmann" and not isinstance(semiring, MaxSemiring):
+      warnings.warn(
+          "Kuhlmann's arc-hybrid algorithm does not provide correct results"
+          " for any semiring except MaxSemiring due to spurious ambiguity.")
+
+    if algorithm == "Eisner":
+      return self._structure_forward_Eisner(base_struct, semiring, key)
+    elif algorithm == "Kuhlmann":
       return self._structure_forward_Kuhlmann_arc_hybrid(
           base_struct, semiring, key)
-    elif algorithm is None or algorithm == "Eisner":
-      return self._structure_forward_Eisner(base_struct, semiring, key)
     else:
       raise ValueError(f"Unknown algorithm {algorithm}.")
 

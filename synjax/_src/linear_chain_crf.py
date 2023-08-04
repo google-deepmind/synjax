@@ -26,9 +26,6 @@ from synjax._src.typing import Key, typed
 from synjax._src.utils.semirings import Semiring
 
 
-AlgorithmName = Literal["sequential", "parallel"]
-
-
 @typed
 class LinearChainCRF(SemiringDistribution):
   """Distribution representing linear chain CRF.
@@ -76,9 +73,12 @@ class LinearChainCRF(SemiringDistribution):
 
   @typed
   def _structure_forward(
-      self, base_struct: Float[Array, "n t t"], semiring: Semiring,
-      key: Key, forward_algorithm: AlgorithmName = "sequential"
+      self, base_struct: Float[Array, "n t t"], semiring: Semiring, key: Key,
+      forward_algorithm: Optional[Literal["sequential", "parallel"]] = None
       ) -> Float[Array, "s"]:
+    if forward_algorithm is None:
+      forward_algorithm = get_config().linear_chain_crf_forward_algorithm
+
     if forward_algorithm == "sequential":
       return self._structure_forward_sequential(base_struct, semiring, key)
     elif forward_algorithm == "parallel":

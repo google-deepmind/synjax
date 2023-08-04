@@ -13,21 +13,33 @@
 # limitations under the License.
 
 """Manages global SynJax configuration."""
+import contextlib
 import dataclasses
 import functools
+from typing import Literal
+from synjax._src.typing import typed  # pylint: disable=g-importing-member
 
 
+@typed
 @functools.partial(dataclasses.dataclass, frozen=True)
 class SynJaxConfig():
+  """SynJax configuration."""
 
   use_strict_max: bool = False
   checkpoint_loops: bool = True
   checkpoint_semiring_einsum: bool = True
   # Matrix-Tree Theorem settings
   mtt_shift_log_potentials: bool = True
-  mtt_logdet_method: str = "qr"
-  mtt_inv_method: str = "qr"
-  mtt_inv_matmul_precision: str = "highest"
+  mtt_logdet_method: Literal["lu", "qr"] = "lu"
+  mtt_inv_method: Literal["solve", "qr"] = "solve"
+  mtt_inv_matmul_precision: Literal["default", "high", "highest"] = "default"
+  # CTC settings
+  ctc_use_optax: bool = False
+  # Projective Spanning Trees settings
+  projective_argmax_algorithm: Literal["Kuhlmann", "Eisner"] = "Kuhlmann"
+  # Linear-Chain CRF settings
+  linear_chain_crf_forward_algorithm: Literal["sequential", "parallel"] = (
+      "sequential")
 
 
 _config = SynJaxConfig()
@@ -37,6 +49,14 @@ def get_config() -> SynJaxConfig:
   return _config
 
 
-def set_config(**kwargs) -> None:
+def set_config(**settings) -> None:
   global _config
-  _config = dataclasses.replace(_config, **kwargs)
+  _config = dataclasses.replace(_config, **settings)
+
+
+@contextlib.contextmanager
+def config_context(**settings):
+  prior_settings = dataclasses.asdict(get_config())
+  set_config(**settings)
+  yield get_config()
+  set_config(**prior_settings)

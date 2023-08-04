@@ -13,11 +13,12 @@
 # limitations under the License.
 
 """SynJax is a library for structured prediction."""
-# pylint: disable=g-multiple-import
+# pylint: disable=g-multiple-import, g-importing-member
 from synjax import semirings
 from synjax import special
-from synjax._src.alignment_crf import AlignmentCRF
-from synjax._src.config import get_config, set_config
+from synjax._src.alignment_monotone_general import GeneralMonotoneAlignmentCRF
+from synjax._src.alignment_simple import AlignmentCRF
+from synjax._src.config import get_config, set_config, config_context
 from synjax._src.constituency_pcfg import PCFG, GeneralizedPCFG
 from synjax._src.constituency_tensor_decomposition_pcfg import TensorDecompositionPCFG, GeneralizedTensorDecompositionPCFG
 from synjax._src.constituency_tree_crf import TreeCRF
@@ -35,6 +36,7 @@ __all__ = (
     "Distribution",
     "SemiringDistribution",
     "AlignmentCRF",
+    "GeneralMonotoneAlignmentCRF",
     "CTC",
     "SpanningTreeCRF",
     "LinearChainCRF",
@@ -47,6 +49,7 @@ __all__ = (
     "GeneralizedTensorDecompositionPCFG",
     "get_config",
     "set_config",
+    "config_context",
     "semirings",
     "special",
 )

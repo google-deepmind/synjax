@@ -15,22 +15,29 @@
 """Utils for efficient chart manipulation."""
 from __future__ import annotations
 
+# pylint: disable=g-multiple-import
+# pylint: disable=g-importing-member
+
+from typing import Union
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from jaxtyping import Int, Float, Array
 from synjax._src import constants
+from synjax._src.typing import typed
 from synjax._src.utils import semirings
 from synjax._src.utils import special
 
 
-Array = jax.Array
-ArrayLike = jax.typing.ArrayLike
 Semiring = semirings.Semiring
 roll = special.roll
+SpanSize = Union[int, Int[Array, ""]]
 
 
-def from_cky_table(cky_table):
+@typed
+def from_cky_table(cky_table: Float[Array, "s n n ..."]) -> "Chart":
   """Creates a chart from a table of shape (s, n, n, ...).
 
   Args:
@@ -54,6 +61,7 @@ def from_cky_table(cky_table):
   return Chart(table_left_child, table_right_child)
 
 
+@typed
 class Chart(eqx.Module):
   """Vectorized chart methods described by Rush (2020).
 
@@ -61,25 +69,32 @@ class Chart(eqx.Module):
     Rush, 2020 - Section 6b: https://arxiv.org/pdf/2002.00876.pdf#page=5
   """
 
-  _table_left_child: Array   # Corresponds to Cr in Rush (2020).
-  _table_right_child: Array  # Corresponds to Cl in Rush (2020).
+  _table_left_child: Float[Array, "s n n ..."]   # Cr in Rush (2020).
+  _table_right_child: Float[Array, "s n n ..."]  # Cl in Rush (2020).
 
-  def __init__(self, table_left_child, table_right_child):
+  @typed
+  def __init__(self,
+               table_left_child: Float[Array, "s n n ..."],
+               table_right_child: Float[Array, "s n n ..."]):
     self._table_left_child = table_left_child
     self._table_right_child = table_right_child
 
-  def left(self) -> Array:
+  @typed
+  def left(self) -> Float[Array, "s n n ..."]:
     return self._table_left_child
 
-  def right_unmasked(self, d):
+  @typed
+  def right_unmasked(self, d: SpanSize) -> Float[Array, "s n n ..."]:
     a = roll(self._table_right_child, -d+1, axis=1)
     b = roll(a, d-1, axis=2)
     return b
 
-  def get_entries(self, d):
+  @typed
+  def get_entries(self, d: SpanSize) -> Float[Array, "s n ..."]:
     return self._table_left_child[:, :, d-1]
 
-  def set_entries(self, d, entries):
+  @typed
+  def set_entries(self, d: SpanSize, entries) -> "Chart":
     new_table_left_child = self._table_left_child.at[:, :, d-1].set(entries)
     new_table_right_child = self._table_right_child.at[:, :, -d].set(
         roll(entries, d-1, axis=1))
@@ -92,22 +107,28 @@ class Chart(eqx.Module):
     s += ")"
     return s
 
-  def left_non_empty(self) -> Array:
+  @typed
+  def left_non_empty(self) -> Float[Array, "s n n ..."]:
     return roll(self.left(), -1, axis=2)
 
-  def right(self, d: ArrayLike, sr: Semiring,
-            exclude_word_nodes: bool = False) -> Array:
+  @typed
+  def right(self, d: SpanSize, sr: Semiring,
+            exclude_word_nodes: bool = False) -> Float[Array, "s n n ..."]:
     return sr.mul(self.mask(d, sr, exclude_word_nodes), self.right_unmasked(d))
 
-  def right_non_empty(self, d: ArrayLike, sr: Semiring) -> Array:
+  @typed
+  def right_non_empty(self, d: SpanSize, sr: Semiring
+                      ) -> Float[Array, "s n n ..."]:
     return sr.mul(self.mask(d, sr, exclude_word_nodes=False),
                   self.right_unmasked_non_empty(d))
 
-  def right_unmasked_non_empty(self, d: ArrayLike) -> Array:
+  @typed
+  def right_unmasked_non_empty(self, d: SpanSize) -> Float[Array, "s n n ..."]:
     return roll(self.right_unmasked(d), 1, axis=2)
 
-  def mask(self, d: ArrayLike, sr: Semiring, exclude_word_nodes: bool
-           ) -> Array:
+  @typed
+  def mask(self, d: SpanSize, sr: Semiring, exclude_word_nodes: bool
+           ) -> Float[Array, "s n n ..."]:
     n = self._table_left_child.shape[1]
     vertical = jnp.arange(n) < n-d+1
     if exclude_word_nodes:
@@ -119,5 +140,6 @@ class Chart(eqx.Module):
     mask = jnp.expand_dims(mask, range(3, self._table_left_child.ndim))
     return mask
 
-  def pick_length(self, length: Array) -> Array:
+  @typed
+  def pick_length(self, length: Int[Array, ""]) -> Float[Array, "s ..."]:
     return self._table_left_child[:, 0, length-1]

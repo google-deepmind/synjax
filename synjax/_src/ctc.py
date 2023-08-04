@@ -18,8 +18,8 @@ import jax
 import jax.numpy as jnp
 # pylint: disable=g-multiple-import, g-importing-member
 from jaxtyping import Array, Float, Int32, Num
-import optax
-from synjax._src.alignment_crf import AlignmentCRF
+from synjax._src.alignment_monotone_general import GeneralMonotoneAlignmentCRF
+from synjax._src.config import get_config
 from synjax._src.constants import INF
 from synjax._src.distribution import SemiringDistribution
 from synjax._src.typing import Key, Shape, typed
@@ -101,14 +101,17 @@ class CTC(SemiringDistribution):
     step_2 = jnp.where(jnp.arange(step_2.shape[-1]) == self.input_lengths-1,
                        -INF, step_2)
 
-    dist = AlignmentCRF(
+    dist = GeneralMonotoneAlignmentCRF(
         (step_0, step_1, step_2), None,
         lengths_rows=self.label_lengths, lengths_cols=self.input_lengths)
     # pylint: disable=protected-access
     return dist._structure_forward(jnp.zeros(dist.event_shape), semiring, key)
 
   @typed
-  def log_partition(self, use_optax: bool = True) -> Float[Array, "*batch"]:
+  def log_partition(self, use_optax: Optional[bool] = None
+                    ) -> Float[Array, "*batch"]:
+    if use_optax is None:
+      use_optax = get_config().ctc_use_optax
     if use_optax:
       n = self.log_potentials.shape[-2]
       l = self.labels_extended.shape[-1] // 2
@@ -116,9 +119,15 @@ class CTC(SemiringDistribution):
       label_paddings = jnp.arange(l) >= (self.label_lengths[:, None]//2)
       labels = self.labels_extended[..., 1::2]
       logits = self.log_potentials
+      import optax  # pylint: disable=g-import-not-at-top
       return -optax.ctc_loss(logits, logit_paddings, labels, label_paddings)
     else:
       return super().log_partition()
+
+  @typed
+  def marginals_for_template_variables(self, **kwargs) -> "CTC":
+    # This override is needed because Optax internally does normalization.
+    return super().marginals_for_template_variables(use_optax=False)
 
   @typed
   def log_count(self) -> Float[Array, "*batch"]:
@@ -127,7 +136,7 @@ class CTC(SemiringDistribution):
     return super().log_count(use_optax=False)
 
   @typed
-  def loss(self, use_optax: bool = True) -> Float[Array, "*batch"]:
+  def loss(self, use_optax: Optional[bool] = None) -> Float[Array, "*batch"]:
     return -self.log_partition(use_optax=use_optax)
 
   @typed

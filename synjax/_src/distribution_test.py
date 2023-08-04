@@ -17,6 +17,7 @@ import functools
 from typing import List
 from absl.testing import parameterized
 
+# pylint: disable=g-importing-member
 import jax
 import jax.numpy as jnp
 import numpy as np

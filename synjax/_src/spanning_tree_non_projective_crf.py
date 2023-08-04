@@ -35,6 +35,57 @@ from synjax._src.utils import special
 SamplingAlgorithmName = Literal["colbourn", "wilson"]
 
 
+@typed
+def _optionally_shift_log_potentials(
+    log_potentials: Float[Array, "*batch n n"], single_root: bool
+    ) -> Tuple[Float[Array, "*batch n n"], Float[Array, "*batch"]]:
+  """Makes log-potentials numerically more stable.
+
+  Modifies log_potentials to be more numerically stable without having
+  any impact on the tree distribution. Inspired by see Section D.2 from
+  Paulus et al (2020). This implementation is more stable than
+  Paulus et al because max normalization it is applied column-wise and in that
+  way guarantees that the maximum score of a tree is not bigger than 0, but it
+  breaks the symmetry if there was any.
+
+  References:
+    Paulus et al 2020 - Section D2: https://arxiv.org/pdf/2006.08063.pdf#page=26
+
+  Args:
+    log_potentials: Log-potentials of the graph.
+    single_root: Whether to renormalize the root outgoing edges which is valid
+    only if single-root constraint is used.
+
+  Returns:
+    New log potentials with correction for log-partition.
+  """
+  cfg = get_config()
+  if cfg.mtt_shift_log_potentials:
+    c_matrix = jnp.max(log_potentials, axis=-2, keepdims=True)
+    correction = jnp.sum(c_matrix[..., 0, 1:], -1)
+    if single_root:
+      c_root = jnp.max(
+          log_potentials*jax.nn.one_hot(0, log_potentials.shape[-1])[:, None],
+          axis=-1, keepdims=True)
+      c_matrix += c_root
+      correction += c_root[..., 0, -1]
+    log_potentials -= jax.lax.stop_gradient(c_matrix.at[..., :, 0].set(0))
+  else:
+    correction = jnp.zeros(log_potentials.shape[:-2])
+  return log_potentials, jax.lax.stop_gradient(correction)
+
+
+@typed
+def _custom_slog_det(
+    x: Float[Array, "*batch n n"]
+    ) -> Tuple[Float[Array, "*batch"], Float[Array, "*batch"]]:
+  cfg = get_config()
+  return special.safe_slogdet(x, logdet_method=cfg.mtt_logdet_method,
+                              inv_method=cfg.mtt_inv_method,
+                              matmul_precision=cfg.mtt_inv_matmul_precision,
+                              test_invertability=False)
+
+
 class SpanningTreeNonProjectiveCRF(Distribution):
   """Distribution representing non-projective dependency trees."""
 
@@ -110,32 +161,10 @@ class SpanningTreeNonProjectiveCRF(Distribution):
 
   @typed
   def log_partition(self) -> Float[Array, "*batch"]:
-    log_potentials = self.log_potentials
-    stop_gradient = jax.lax.stop_gradient
-
-    cfg = get_config()
-
-    if cfg.mtt_shift_log_potentials:
-      c_matrix = jnp.max(log_potentials, axis=-2, keepdims=True)
-      c_scalar = jnp.sum(c_matrix[..., 0, 1:], -1)
-      if self.single_root:
-        c_root = jnp.max(
-            log_potentials*jax.nn.one_hot(0, log_potentials.shape[-1])[:, None],
-            axis=-1, keepdims=True)
-        c_matrix += c_root
-        c_scalar += c_root[..., 0, -1]
-      log_potentials -= stop_gradient(c_matrix.at[..., :, 0].set(0))
-    else:
-      c_scalar = 0.
-
-    laplacian_hat = _construct_laplacian_hat(log_potentials,
-                                             single_root=self.single_root)
-
-    slogdet_fn = partial(
-        special.safe_slogdet, logdet_method=cfg.mtt_logdet_method,
-        inv_method=cfg.mtt_inv_method,
-        matmul_precision=cfg.mtt_inv_matmul_precision, test_invertability=False)
-    return stop_gradient(c_scalar) + slogdet_fn(laplacian_hat)[1]
+    log_potentials, correction = _optionally_shift_log_potentials(
+        self.log_potentials, self.single_root)
+    laplacian_hat = _construct_laplacian_hat(log_potentials, self.single_root)
+    return correction + _custom_slog_det(laplacian_hat)[1]
 
   @typed
   def sample_without_replacement(

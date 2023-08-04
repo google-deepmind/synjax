@@ -123,12 +123,15 @@ class Distribution(eqx.Module):
     raise NotImplementedError
 
   @typed
+  def marginals_for_template_variables(self: Self, **kwargs) -> Self:
+    """Marginal prob. of template parts (e.g. PCFG rules instead tree nodes)."""
+    grad_f = grad_ndim(lambda x: x.log_partition(**kwargs), self.batch_ndim)
+    return prob_clip(grad_f(self))
+
+  @typed
   def marginals(self, **kwargs) -> SoftEvent:
     """Marginal probability of structure's parts."""
-    def f(dist):
-      return dist.log_partition(**kwargs)
-    m = grad_ndim(f, self.batch_ndim)(self).log_potentials
-    return prob_clip(m)
+    return self.marginals_for_template_variables(**kwargs).log_potentials
 
   @typed
   def log_marginals(self, **kwargs) -> SoftEvent:
@@ -188,8 +191,7 @@ class Distribution(eqx.Module):
     Returns:
       Entropy value.
     """  # pylint: disable=line-too-long
-    m = self.marginals(**kwargs)
-    return -cast(Array, vmap_ndim(tsum_all, self.batch_ndim)(tmul(m, tlog(m))))
+    return self.cross_entropy(self, **kwargs)
 
   @typed
   def cross_entropy(self: Self, other: Self, **kwargs
@@ -205,14 +207,18 @@ class Distribution(eqx.Module):
     Returns:
       The cross entropy `H(self || other_dist)`.
     """  # pylint: disable=line-too-long
-    log_q = other.log_marginals(**kwargs)
-    p = self.marginals(**kwargs)
-    return -cast(Array, vmap_ndim(tsum_all, self.batch_ndim)(tmul(p, log_q)))
+    def param_leaves(x):
+      return [y for y in tree_leaves(x) if eqx.is_inexact_array(y)]
+    p_marginals = param_leaves(self.marginals_for_template_variables(**kwargs))
+    q_log_potentials = param_leaves(other)
+    q_log_z = other.log_partition(**kwargs)
+    return q_log_z - vmap_ndim(tsum_all, self.batch_ndim
+                               )(tmul(p_marginals, q_log_potentials))
 
   @typed
   def kl_divergence(self: Self, other: Self, **kwargs
                     ) -> Float[Array, "*batch"]:
-    """Calculates the KL divergence to another distribution.
+    """Calculates the KL divergence to another distribution (in nats).
 
     References:
       Li and Eisner, 2009 - Section 6.1: https://aclanthology.org/D09-1005.pdf#page=9
@@ -223,9 +229,7 @@ class Distribution(eqx.Module):
     Returns:
       The KL divergence `KL(self || other)`.
     """  # pylint: disable=line-too-long
-    log_q = other.log_marginals(**kwargs)
-    p = self.marginals(**kwargs)
-    return vmap_ndim(tsum_all, self.batch_ndim)(tmul(p, tsub(tlog(p), log_q)))
+    return self.cross_entropy(other, **kwargs) - self.entropy(**kwargs)
 
   def __getitem__(self: Self, i) -> Self:
     """If distribution is batched, indexes sub-distribution from the batch."""

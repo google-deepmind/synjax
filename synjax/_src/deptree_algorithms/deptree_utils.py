@@ -25,41 +25,6 @@ Array = jax.Array
 INF = constants.INF
 
 
-def numerically_stabilize_log_potentials(log_potentials: Array, directed: bool
-                                         ) -> Array:
-  """Makes log-potentials numerically more stable.
-
-  Modifies log_potentials to be more numerically stable without having
-  a big impact on the tree distribution. Inspired by see Section D.2 from
-  Paulus et al (2020). In case of directed=False it is exactly the same as
-  Paulus et al version. In case of directed=True it is more stable than
-  Paulus et al because max normalization it is applied column-wise and in that
-  way guarantees that the maximum score of a tree is not bigger than 0.
-
-  References:
-    Paulus et al 2020 - Section D2: https://arxiv.org/pdf/2006.08063.pdf#page=26
-  Args:
-    log_potentials: Log-potentials of the graph.
-    directed: Whether the spanning tree is rooted directed tree
-              or non-rooted undirected.
-  Returns:
-    New log potentials where the minimal values is -15 and maximal 0.
-  """
-  # This doesn't affect tree distribution. Makes maximal log_potential in
-  # each column 0, except for the 0th column that is reserved for ROOT.
-  if directed:
-    max_val = jnp.max(log_potentials, axis=-2, keepdims=True).at[..., 0].set(0.)
-  else:
-    max_val = jnp.max(log_potentials, axis=(-1, -2), keepdims=True)
-  log_potentials -= jax.lax.stop_gradient(max_val)
-  # Now the maximal log_potential for each column will be 0.
-
-  # The line below does change the distribution slightly.
-  # Makes the minimal log_potential not smaller than -15.
-  log_potentials = jnp.clip(log_potentials, -15, 0)
-  return log_potentials
-
-
 def pad_log_potentials(log_potentials: Array, length: Array) -> Array:
   """Pads adjecancy matrix of log_potentials so that it has same log_partition.
 

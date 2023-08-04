@@ -172,6 +172,11 @@ class SpanningTreeCRF(Distribution):
     return self._dist.log_partition(**kwargs)
 
   @typed
+  def marginals_for_template_variables(self, **kwargs
+                                       ) -> Float[Array, "*batch n n"]:
+    return self._dist.marginals_for_template_variables(**kwargs)
+
+  @typed
   def marginals(self, **kwargs) -> Float[Array, "*batch n n"]:
     m = self._dist.marginals(**kwargs)
     if not self.directed:
