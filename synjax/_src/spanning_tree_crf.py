@@ -24,7 +24,6 @@ from synjax._src.distribution import Distribution
 from synjax._src.spanning_tree_non_projective_crf import SpanningTreeNonProjectiveCRF
 from synjax._src.spanning_tree_projective_crf import SpanningTreeProjectiveCRF
 from synjax._src.typing import Shape, Key, typed
-from synjax._src.utils import special
 
 
 class SpanningTreeCRF(Distribution):
@@ -32,7 +31,7 @@ class SpanningTreeCRF(Distribution):
 
   directed: bool = eqx.static_field()
   projective: bool = eqx.static_field()
-  single_root: bool = eqx.static_field()
+  single_root_edge: bool = eqx.static_field()
   _dist: Union[SpanningTreeNonProjectiveCRF, SpanningTreeProjectiveCRF]
 
   @typed
@@ -41,7 +40,7 @@ class SpanningTreeCRF(Distribution):
                *,
                directed: bool,
                projective: bool,
-               single_root: bool,
+               single_root_edge: bool,
                lengths: Optional[Int32[Array, "*batch"]] = None):
     """Spanning Tree Conditional-Random Field distribution.
 
@@ -75,8 +74,8 @@ class SpanningTreeCRF(Distribution):
                   i.e. if there should be no crossing tree branches when nodes
                   are positioned on a single line with their canonical order
                   (see Eisner, 2020).
-      single_root: Boolean flag signifying if the number of arcs leaving root
-                   node (node at position 0) should be exactly 1.
+      single_root_edge: Boolean flag signifying if the number of arcs leaving
+                        root node (node at position 0) should be exactly 1.
       lengths: Optional array providing the length of non-root nodes in the
                graphs. The "non-root" part is important. This array,
                if provided, will be used for automatic padding.
@@ -84,13 +83,14 @@ class SpanningTreeCRF(Distribution):
     super().__init__(log_potentials=None)
     self.directed = directed
     self.projective = projective
-    self.single_root = single_root
+    self.single_root_edge = single_root_edge
     if not directed:
       # Symmetrize log_potentials.
       log_potentials = (log_potentials + jnp.swapaxes(log_potentials, -2, -1))/2
     cls = (SpanningTreeProjectiveCRF if projective
            else SpanningTreeNonProjectiveCRF)
-    self._dist = cls(log_potentials, lengths=lengths, single_root=single_root)
+    self._dist = cls(log_potentials, lengths=lengths,
+                     single_root_edge=single_root_edge)
 
   @property
   def event_shape(self) -> Shape:
@@ -212,12 +212,7 @@ class SpanningTreeCRF(Distribution):
 
   @typed
   def entropy(self, **kwargs) -> Float[Array, "*batch"]:
-    if self.directed:
-      return self._dist.entropy(**kwargs)
-    else:
-      p = jnp.triu(self.marginals(**kwargs))
-      log_p = special.safe_log(p)
-      return -jnp.sum(p * log_p, (-1, -2))
+    return self._dist.entropy(**kwargs)
 
   @typed
   def cross_entropy(self, other: SpanningTreeCRF, **kwargs
@@ -225,13 +220,8 @@ class SpanningTreeCRF(Distribution):
     if self.directed != other.directed:
       raise ValueError("Cross entropy cannot be computed between directed and"
                        "undirected spanning tree distributions.")
-    if self.directed:
-      # pylint: disable=protected-access
-      return self._dist.cross_entropy(other._dist, **kwargs)
-    else:
-      p = jnp.triu(self.marginals(**kwargs))
-      log_q = other.log_marginals(**kwargs)
-      return -jnp.sum(p * log_q, (-1, -2))
+    # pylint: disable=protected-access
+    return self._dist.cross_entropy(other._dist, **kwargs)
 
   @typed
   def kl_divergence(self, other: SpanningTreeCRF, **kwargs
@@ -239,11 +229,5 @@ class SpanningTreeCRF(Distribution):
     if self.directed != other.directed:
       raise ValueError("Cross entropy cannot be computed between directed and"
                        "undirected spanning tree distributions.")
-    if self.directed:
-      # pylint: disable=protected-access
-      return self._dist.kl_divergence(other._dist, **kwargs)
-    else:
-      p = jnp.triu(self.marginals(**kwargs))
-      log_p = special.safe_log(p)
-      log_q = other.log_marginals(**kwargs)
-      return jnp.sum(p * (log_p-log_q), (-1, -2))
+    # pylint: disable=protected-access
+    return self._dist.kl_divergence(other._dist, **kwargs)

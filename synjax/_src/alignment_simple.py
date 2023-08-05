@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Distribution of alignments between two sequences."""
+from __future__ import annotations
 # pylint: disable=g-multiple-import, g-importing-member
 from functools import partial
 from typing import Optional, Tuple, Literal, Union
@@ -58,7 +59,7 @@ def _jax_non_monotone_align_callback(log_potentials: Float[Array, "*b n n"],
 
 class AlignmentCRF(Distribution):
   """Simple alignment CRF that covers most use-cases.
-  
+
   This alignment class provides both monotone and non-monotone alignment, but
   restricts all alignment scores to be defined per cell, i.e. the score does not
   depend on the direction of the path trough the alignment table but only on the
@@ -109,7 +110,7 @@ class AlignmentCRF(Distribution):
       if log_potentials.shape[-1] != log_potentials.shape[-2]:
         raise ValueError("Non-monotone alignment requires square matrix.")
     else:
-      raise ValueError("Unknown alignment type: %s" % alignment_type)
+      raise ValueError(f"Unknown alignment type: {alignment_type}")
 
   @property
   def event_shape(self) -> Shape:
@@ -212,20 +213,21 @@ class AlignmentCRF(Distribution):
       return self._dist.entropy(**kwargs)
 
   @typed
-  def cross_entropy(self, other, **kwargs) -> Float[Array, "*batch"]:
+  def cross_entropy(self, other: AlignmentCRF, **kwargs
+                    ) -> Float[Array, "*batch"]:
+    # pylint: disable=protected-access
     if self.alignment_type == "non_monotone_one_to_one":
       raise NotImplementedError(
           "Non-monotone alignment doesn't support cross-entropy.")
     else:
-      # pylint: disable=protected-access
       return self._dist.cross_entropy(other._dist, **kwargs)
 
   @typed
-  def kl_divergence(self, other, **kwargs
+  def kl_divergence(self, other: AlignmentCRF, **kwargs
                     ) -> Float[Array, "*batch"]:
+    # pylint: disable=protected-access
     if self.alignment_type == "non_monotone_one_to_one":
       raise NotImplementedError(
           "Non-monotone alignment doesn't support KL divergence.")
     else:
-      # pylint: disable=protected-access
       return self._dist.kl_divergence(other._dist, **kwargs)

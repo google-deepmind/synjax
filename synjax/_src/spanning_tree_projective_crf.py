@@ -36,15 +36,15 @@ Chart = chart_struct.Chart
 class SpanningTreeProjectiveCRF(SemiringDistribution):
   """Distribution representing projective dependency trees."""
 
-  single_root: bool = eqx.static_field()
+  single_root_edge: bool = eqx.static_field()
   lengths: Int32[Array, "*batch"]
 
   @typed
   def __init__(self, log_potentials: Float[Array, "*batch n n"],
                *,
-               single_root: bool,
+               single_root_edge: bool,
                lengths: Optional[Int32[Array, "*batch"]] = None):
-    self.single_root = single_root
+    self.single_root_edge = single_root_edge
     if lengths is None:
       lengths = jnp.full(log_potentials.shape[:-2], log_potentials.shape[-1])
     self.lengths = lengths
@@ -103,7 +103,7 @@ class SpanningTreeProjectiveCRF(SemiringDistribution):
     """
     # See Figure 1b in Shi et al 2017 for good illustration of the algorithm.
     n = self.log_potentials.shape[-1]-1  # Number of words excluding ROOT node.
-    if self.single_root:
+    if self.single_root_edge:
       # Apply Reweighting algorithm from Stanojević and Cohen 2021.
       # https://aclanthology.org/2021.emnlp-main.823.pdf
       lp = jnp.clip(self.log_potentials, -INF/100)
@@ -200,7 +200,7 @@ class SpanningTreeProjectiveCRF(SemiringDistribution):
      chart_left_comp, chart_right_comp) = state
     del chart_left_incomp, chart_right_incomp  # These are not used later.
 
-    if self.single_root:
+    if self.single_root_edge:
       left = chart_right_comp.left()[:, 1, :-1]
       right = chart_left_comp.right_unmasked_non_empty(n-1)[:, 1, :-1]
       arcs = semiring.wrap(params[0, 1:])

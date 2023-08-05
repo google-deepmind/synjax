@@ -189,36 +189,37 @@ def _arcmax(log_potentials: NPArray) -> NPArray:
 
 
 @numba.njit
-def _parse(log_potentials: NPArray, single_root: bool) -> NPArray:
+def _parse(log_potentials: NPArray, single_root_edge: bool) -> NPArray:
   """Applies ArcMax and Reweighting tricks before calling Tarjan's algorithm."""
   proposal = _arcmax(log_potentials)
   root_count = np.count_nonzero(proposal[1:] == 0)
-  if deptree_utils.is_tree(proposal) and (not single_root or root_count == 1):
+  if deptree_utils.is_tree(proposal) and (not single_root_edge
+                                          or root_count == 1):
     result = proposal
   else:
-    if single_root:
+    if single_root_edge:
       log_potentials = _reweighting(log_potentials)
     result = _tarjan(log_potentials)
   return result
 
 
 @numba.guvectorize("(n,n),(),()->(n)", nopython=True)
-def _vectorized_mst(log_potentials, length, single_root, res):
-  res[:length] = _parse(log_potentials[:length, :length], single_root)
+def _vectorized_mst(log_potentials, length, single_root_edge, res):
+  res[:length] = _parse(log_potentials[:length, :length], single_root_edge)
   res[length:] = length
 
 
 def vectorized_mst(log_potentials: NPArray, lengths: Optional[NPArray],
-                   single_root: bool) -> NPArray:
+                   single_root_edge: bool) -> NPArray:
   """Numpy implementation of MST that supports batch dimension."""
   if lengths is None:
     lengths = np.full(log_potentials.shape[:-2], log_potentials.shape[-1])
-  single_root_expanded = np.full(log_potentials.shape[:-2], single_root,
-                                 dtype=np.int64)
+  single_root_edge_expanded = np.full(
+      log_potentials.shape[:-2], single_root_edge, dtype=np.int64)
   assert log_potentials.shape[:-2] == lengths.shape
   out = np.full(log_potentials.shape[:-1], -2, dtype=np.int64)
   log_potentials = log_potentials.astype(np.float64)
   lengths = lengths.astype(np.int64)
   with np.errstate(invalid="ignore"):
-    _vectorized_mst(log_potentials, lengths, single_root_expanded, out)
+    _vectorized_mst(log_potentials, lengths, single_root_edge_expanded, out)
   return out

@@ -21,7 +21,6 @@ import jax.numpy as jnp
 from synjax._src import distribution_test
 from synjax._src.alignment_monotone_general import GeneralMonotoneAlignmentCRF
 from synjax._src.utils import special
-import typeguard
 
 
 class GeneralMonotoneAlignmentCrfTest(distribution_test.DistributionTest):
@@ -55,7 +54,7 @@ class GeneralMonotoneAlignmentCrfTest(distribution_test.DistributionTest):
     step_0 = jnp.zeros((b, m, m))
     step_1 = jnp.zeros((b, m, m-1))
 
-    e = typeguard.TypeCheckError
+    e = Exception
     self.assertRaises(
         e, lambda: GeneralMonotoneAlignmentCRF((step_0, step_1), step_0))
     self.assertRaises(

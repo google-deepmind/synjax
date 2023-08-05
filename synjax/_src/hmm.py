@@ -20,7 +20,6 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float, Int32
 from synjax._src import linear_chain_crf
 from synjax._src.typing import typed
-import typeguard
 
 
 @typed
@@ -94,8 +93,7 @@ def HMM(init_logits: Float[Array, "*batch state"],
     x = jnp.take_along_axis(emission_dist, observations[..., None, :], -1)
     emission_scores = jnp.swapaxes(x, -1, -2)  # (*batch_shape, n, state)
   else:
-    raise typeguard.TypeCheckError(
-        "Arguments for emission_dist and observations do not fit.")
+    raise ValueError("Arguments for emission_dist and observations do not fit.")
 
   return linear_chain_crf.LinearChainCRF(
       log_potentials=_expand_simple_sequence_model(

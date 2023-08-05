@@ -26,6 +26,9 @@ from synjax._src import spanning_tree_non_projective_crf
 from synjax._src.deptree_algorithms import deptree_non_proj_wilson_sampling
 from synjax._src.deptree_algorithms import deptree_utils
 
+SpanningTreeNonProjectiveCRF = (
+    spanning_tree_non_projective_crf.SpanningTreeNonProjectiveCRF)
+
 
 class SpanningTreeNonProjectiveCRFTest(
     distribution_test.DistributionTest):
@@ -34,23 +37,28 @@ class SpanningTreeNonProjectiveCRFTest(
     b = 3
     n_words = 5
     log_potentials = jax.random.normal(key, (b, n_words+1, n_words+1))
-    dists = [spanning_tree_non_projective_crf.SpanningTreeNonProjectiveCRF(
-        log_potentials=log_potentials, lengths=None, single_root=single_root)
-             for single_root in [True, False]]
+    dists = []
+    for single_root_edge in [True, False]:
+      dists.append(SpanningTreeNonProjectiveCRF(
+          log_potentials=log_potentials, lengths=None,
+          single_root_edge=single_root_edge))
     return dists
 
   def create_symmetric_batched_dists(self):
     b = 3
     n_words = 5
     log_potentials = jnp.zeros((b, n_words+1, n_words+1))
-    dists = [spanning_tree_non_projective_crf.SpanningTreeNonProjectiveCRF(
-        log_potentials=log_potentials, lengths=None, single_root=single_root)
-             for single_root in [True, False]]
+    dists = []
+    for single_root_edge in [True, False]:
+      dists.append(SpanningTreeNonProjectiveCRF(
+          log_potentials=log_potentials, lengths=None,
+          single_root_edge=single_root_edge))
     return dists
 
   def create_invalid_shape_distribution(self):
-    return spanning_tree_non_projective_crf.SpanningTreeNonProjectiveCRF(
-        log_potentials=jnp.zeros((3, 6, 5)), lengths=None, single_root=True)
+    return SpanningTreeNonProjectiveCRF(
+        log_potentials=jnp.zeros((3, 6, 5)), lengths=None,
+        single_root_edge=True)
 
   def analytic_log_count(self, dist) -> jax.Array:
     """Computes the log of the number of the spanning trees in the support.
@@ -65,7 +73,7 @@ class SpanningTreeNonProjectiveCRFTest(
     Returns:
       The log of the number of the spanning trees.
     """
-    if dist.single_root:
+    if dist.single_root_edge:
       return (dist.lengths-2)*jnp.log(dist.lengths-1)
     else:
       return (dist.lengths-2)*jnp.log(dist.lengths)
@@ -90,7 +98,7 @@ class SpanningTreeNonProjectiveCRFTest(
     n_words = trees.shape[-1]-1
     self.assert_allclose(jnp.diagonal(samples, axis1=-2, axis2=-1), 0)
     self.assert_allclose(samples[..., 0], 0)
-    if dist.single_root:
+    if dist.single_root_edge:
       self.assert_allclose(jnp.count_nonzero(trees[..., 1:], axis=-1),
                            n_words - 1)
 
@@ -100,7 +108,7 @@ class SpanningTreeNonProjectiveCRFTest(
         marginals.shape[-1]-1)
     self.assert_allclose(jnp.diagonal(marginals, axis1=-2, axis2=-1), 0)
     self.assert_allclose(marginals[..., 0], 0)
-    if dist.single_root:
+    if dist.single_root_edge:
       self.assert_allclose(jnp.sum(marginals[:, 0, 1:], axis=-1), 1)
 
   def test_top_k(self):
@@ -151,8 +159,9 @@ class SpanningTreeNonProjectiveCRFTest(
         sample = dist.sample(jax.random.PRNGKey(0), algorithm="colbourn")
         self.assert_valid_marginals(dist, sample)
 
-  @parameterized.parameters([dict(single_root=True), dict(single_root=False)])
-  def test_marginals_with_given_laplacian_invt(self, single_root: bool):
+  @parameterized.parameters([dict(single_root_edge=True),
+                             dict(single_root_edge=False)])
+  def test_marginals_with_given_laplacian_invt(self, single_root_edge: bool):
     n = 5
     potentials = jax.random.uniform(jax.random.PRNGKey(0), (n, n))
     potentials = potentials.at[:, 0].set(0)   # Nothing enters root node.
@@ -160,22 +169,23 @@ class SpanningTreeNonProjectiveCRFTest(
     log_potentials = jnp.log(potentials)
 
     laplacian = spanning_tree_non_projective_crf._construct_laplacian_hat(
-        log_potentials, single_root=single_root)
+        log_potentials, single_root_edge=single_root_edge)
     laplacian_invt = jnp.linalg.inv(laplacian).T
     marginals_a = (
         spanning_tree_non_projective_crf._marginals_with_given_laplacian_invt(
-            log_potentials, laplacian_invt, single_root=single_root))
+            log_potentials, laplacian_invt, single_root_edge=single_root_edge))
     marginals_b = jnp.asarray(
         deptree_non_proj_wilson_sampling._marginals_with_given_laplacian_invt(
             np.asarray(log_potentials), np.asarray(laplacian_invt),
-            single_root=single_root))
-    marginals_c = spanning_tree_non_projective_crf.SpanningTreeNonProjectiveCRF(
-        log_potentials=log_potentials, single_root=single_root).marginals()
+            single_root_edge=single_root_edge))
+    marginals_c = SpanningTreeNonProjectiveCRF(
+        log_potentials=log_potentials,
+        single_root_edge=single_root_edge).marginals()
     # pylint: disable=g-long-lambda
     marginals_d = jax.grad(            # This should in principle be the same
         lambda x: jnp.linalg.slogdet(  # as marginals_a but without API fluff.
             spanning_tree_non_projective_crf._construct_laplacian_hat(
-                x, single_root=single_root))[1])(log_potentials)
+                x, single_root_edge=single_root_edge))[1])(log_potentials)
     self.assert_allclose(marginals_a, marginals_b)
     self.assert_allclose(marginals_a, marginals_c)
     self.assert_allclose(marginals_a, marginals_d)

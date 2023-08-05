@@ -35,7 +35,7 @@ class SpanningTreeCrfTest(distribution_test.DistributionTest):
   def _create_dist(self, f):
     b, n = 2, 6
     return [spanning_tree_crf.SpanningTreeCRF(
-        log_potentials=f((b, n, n)), directed=False, single_root=True,
+        log_potentials=f((b, n, n)), directed=False, single_root_edge=True,
         projective=projective) for projective in [True, False]]
 
   def create_random_batched_dists(self, key: jax.random.KeyArray):
@@ -47,7 +47,7 @@ class SpanningTreeCrfTest(distribution_test.DistributionTest):
   def create_invalid_shape_distribution(self):
     return spanning_tree_crf.SpanningTreeCRF(
         log_potentials=jnp.zeros((2, 6, 6-1)), directed=False,
-        single_root=True, projective=True)
+        single_root_edge=True, projective=True)
 
   def test_log_count(self):
     # Skips testing for log-count since there is no simple unified formula for
@@ -65,7 +65,7 @@ class SpanningTreeCrfTest(distribution_test.DistributionTest):
     self.assert_allclose(jnp.where(mask, 0, samples), 0)
     if not dist.directed:
       self.assert_is_symmetric(dist, samples)
-    if dist.single_root:
+    if dist.single_root_edge:
       self.assert_allclose(jnp.sum(samples[..., 0, :], -1), 1)
 
   def assert_valid_marginals(self, dist, marginals):

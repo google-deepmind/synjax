@@ -23,7 +23,6 @@ from synjax._src.constants import INF
 from synjax._src.distribution import SemiringDistribution
 from synjax._src.typing import Shape, Key, typed
 from synjax._src.utils import semirings
-import typeguard
 
 
 class GeneralMonotoneAlignmentCRF(SemiringDistribution):
@@ -76,11 +75,10 @@ class GeneralMonotoneAlignmentCRF(SemiringDistribution):
     """
     super().__init__(log_potentials=None, struct_is_isomorphic_to_params=False)
     if not isinstance(log_potentials_horizontal, tuple):
-      raise typeguard.TypeCheckError("log_potentials_horizontl must be a tuple.")
+      raise ValueError("log_potentials_horizontal must be a tuple.")
     if len(log_potentials_horizontal)+(log_potentials_vertical is not None) < 2:
       # Explicit check needed here because jaxtyping checks fail sometimes.
-      raise typeguard.TypeCheckError(
-          "Arguments log-potentials must have the same shape.")
+      raise ValueError("Arguments log-potentials must have the same shape.")
     rows, cols = log_potentials_horizontal[0].shape[-2:]
     if (log_potentials_vertical is None and lengths_cols is None
         and lengths_rows is None and rows >= cols):

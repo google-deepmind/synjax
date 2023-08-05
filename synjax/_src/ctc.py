@@ -119,7 +119,9 @@ class CTC(SemiringDistribution):
       label_paddings = jnp.arange(l) >= (self.label_lengths[:, None]//2)
       labels = self.labels_extended[..., 1::2]
       logits = self.log_potentials
-      import optax  # pylint: disable=g-import-not-at-top
+      # pylint: disable=g-import-not-at-top
+      # pylint: disable=import-outside-toplevel
+      import optax
       return -optax.ctc_loss(logits, logit_paddings, labels, label_paddings)
     else:
       return super().log_partition()

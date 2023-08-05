@@ -23,7 +23,6 @@ import jax.numpy as jnp
 import numpy as np
 from synjax._src import constants
 from synjax._src.distribution import Distribution
-import typeguard
 
 
 class DistributionTest(parameterized.TestCase):
@@ -95,8 +94,7 @@ class DistributionTest(parameterized.TestCase):
     raise NotImplementedError
 
   def test_crash_on_invalid_shapes(self):
-    self.assertRaises(typeguard.TypeCheckError,
-                      self.create_invalid_shape_distribution)
+    self.assertRaises(Exception, self.create_invalid_shape_distribution)
 
   def test_symmetric(self):
     for dist in self.create_symmetric_batched_dists():

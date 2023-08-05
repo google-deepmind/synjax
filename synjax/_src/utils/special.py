@@ -119,7 +119,7 @@ def safe_slogdet(
   def slogdet_fn_bwd(y: Array, g) -> Tuple[Array]:
     inverse = inv(y, inv_method=inv_method, matmul_precision=matmul_precision,
                   test_invertability=test_invertability)
-    return jnp.einsum("...,...ij->...ji", g[1], inverse),
+    return (jnp.einsum("...,...ij->...ji", g[1], inverse),)
   slogdet_fn.defvjp(slogdet_fn_fwd, slogdet_fn_bwd)
   return slogdet_fn(x)
 

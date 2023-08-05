@@ -55,7 +55,7 @@ To cite this repository:
   author = {Stanojevi\'{c}, Milo\v{s} and Sartran, Laurent},
   title = "{SynJax}",
   url = {http://github.com/deepmind/synjax},
-  version = {0.1.4},
+  version = {2023.8.5},
   year = {2023},
 }
 ```

@@ -37,7 +37,7 @@ SamplingAlgorithmName = Literal["colbourn", "wilson"]
 
 @typed
 def _optionally_shift_log_potentials(
-    log_potentials: Float[Array, "*batch n n"], single_root: bool
+    log_potentials: Float[Array, "*batch n n"], single_root_edge: bool
     ) -> Tuple[Float[Array, "*batch n n"], Float[Array, "*batch"]]:
   """Makes log-potentials numerically more stable.
 
@@ -53,8 +53,8 @@ def _optionally_shift_log_potentials(
 
   Args:
     log_potentials: Log-potentials of the graph.
-    single_root: Whether to renormalize the root outgoing edges which is valid
-    only if single-root constraint is used.
+    single_root_edge: Whether to renormalize the root outgoing edges which is
+                      valid only if single-root constraint is used.
 
   Returns:
     New log potentials with correction for log-partition.
@@ -63,7 +63,7 @@ def _optionally_shift_log_potentials(
   if cfg.mtt_shift_log_potentials:
     c_matrix = jnp.max(log_potentials, axis=-2, keepdims=True)
     correction = jnp.sum(c_matrix[..., 0, 1:], -1)
-    if single_root:
+    if single_root_edge:
       c_root = jnp.max(
           log_potentials*jax.nn.one_hot(0, log_potentials.shape[-1])[:, None],
           axis=-1, keepdims=True)
@@ -89,16 +89,16 @@ def _custom_slog_det(
 class SpanningTreeNonProjectiveCRF(Distribution):
   """Distribution representing non-projective dependency trees."""
 
-  single_root: bool = eqx.static_field()
+  single_root_edge: bool = eqx.static_field()
   lengths: Int32[Array, "*batch"]
 
   @typed
   def __init__(self,
                log_potentials: Float[Array, "*batch n n"],
                *,
-               single_root: bool,
+               single_root_edge: bool,
                lengths: Optional[Int32[Array, "*batch"]] = None):
-    self.single_root = single_root
+    self.single_root_edge = single_root_edge
     if lengths is None:
       batch_shape = log_potentials.shape[:-2]
       lengths = jnp.full(batch_shape, log_potentials.shape[-1])
@@ -117,8 +117,8 @@ class SpanningTreeNonProjectiveCRF(Distribution):
 
   @typed
   def argmax(self, **ignored_args) -> Float[Array, "*batch n n"]:
-    return mst_numpy_callback(
-        self.log_potentials, self.lengths, self.single_root).astype(jnp.float32)
+    return mst_numpy_callback(self.log_potentials, self.lengths,
+                              self.single_root_edge).astype(jnp.float32)
 
   @typed
   def argmax_and_max(self, **kwargs) -> Tuple[Float[Array, "*batch n n"],
@@ -151,7 +151,8 @@ class SpanningTreeNonProjectiveCRF(Distribution):
 
       beam_state, _ = special.vmap_ndim(
           lambda lp: autoregressive_decoding.beam_search(
-              init_state=State.initial(lp, single_root=self.single_root),
+              init_state=State.initial(lp,
+                                       single_root_edge=self.single_root_edge),
               max_length=self.max_nodes-1,
               k=k), self.batch_ndim)(self.log_potentials)
       trees = beam_state.sample
@@ -162,8 +163,9 @@ class SpanningTreeNonProjectiveCRF(Distribution):
   @typed
   def log_partition(self) -> Float[Array, "*batch"]:
     log_potentials, correction = _optionally_shift_log_potentials(
-        self.log_potentials, self.single_root)
-    laplacian_hat = _construct_laplacian_hat(log_potentials, self.single_root)
+        self.log_potentials, self.single_root_edge)
+    laplacian_hat = _construct_laplacian_hat(log_potentials,
+                                             self.single_root_edge)
     return correction + _custom_slog_det(laplacian_hat)[1]
 
   @typed
@@ -185,7 +187,8 @@ class SpanningTreeNonProjectiveCRF(Distribution):
     beam_state, logprobs, gumbels = special.vmap_ndim(
         lambda rng, lp: autoregressive_decoding.stochastic_beam_search(
             key=rng,
-            init_state=State.initial(lp, single_root=self.single_root),
+            init_state=State.initial(lp,
+                                     single_root_edge=self.single_root_edge),
             max_length=self.max_nodes-1,
             k=k), self.batch_ndim
         )(special.split_key_for_shape(key, self.batch_shape),
@@ -203,7 +206,8 @@ class SpanningTreeNonProjectiveCRF(Distribution):
       final_states: State
       final_states, _, _ = special.vmap_ndim(
           lambda rng, lp: autoregressive_decoding.single_ancestral_sample(
-              init_state=State.initial(lp, single_root=self.single_root),
+              init_state=State.initial(lp,
+                                       single_root_edge=self.single_root_edge),
               key=rng, max_length=self.max_nodes-1, unroll=1),
           self.batch_ndim
           )(special.split_key_for_shape(key, self.batch_shape),
@@ -212,7 +216,7 @@ class SpanningTreeNonProjectiveCRF(Distribution):
       sampled_matrices = _to_adjacency_matrix(sampled_trees)
     elif algorithm == "wilson":
       sampled_matrices = sample_wilson_numpy_callback(
-          self.log_potentials, self.lengths, self.single_root
+          self.log_potentials, self.lengths, self.single_root_edge
           ).astype(jnp.float32)
     else:
       raise NotImplementedError(
@@ -247,13 +251,13 @@ class State(autoregressive_decoding.State):
   laplacian_invt: Float[Array, "n-1 n-1"]
   j: Int32[Array, ""]
   sample: Int32[Array, "n"]
-  single_root: bool = eqx.static_field()
+  single_root_edge: bool = eqx.static_field()
 
   @typed
   def logprobs(self) -> Float[Array, "n"]:
     marginals = _marginals_with_given_laplacian_invt(
         jnp.log(self.potentials), self.laplacian_invt,
-        single_root=self.single_root)
+        single_root_edge=self.single_root_edge)
     return special.safe_log(marginals[:, self.j])
 
   @typed
@@ -262,7 +266,7 @@ class State(autoregressive_decoding.State):
     sample = self.sample.at[self.j].set(a)
     state = State(potentials=potentials, laplacian=laplacian,
                   laplacian_invt=laplacian_invt, j=self.j + 1, sample=sample,
-                  single_root=self.single_root)
+                  single_root_edge=self.single_root_edge)
     return state
 
   @typed
@@ -274,7 +278,7 @@ class State(autoregressive_decoding.State):
     constrained_incoming = jax.nn.one_hot(i, potentials_old.shape[-1])
     potentials = potentials_old.at[..., j].set(constrained_incoming)
 
-    laplacian = _construct_laplacian_hat(jnp.log(potentials), self.single_root)
+    laplacian = _construct_laplacian_hat(jnp.log(potentials), self.single_root_edge)
 
     uj = laplacian[:, j - 1] - laplacian_old[:, j - 1]
     bj = laplacian_invt_old[:, j - 1]
@@ -289,19 +293,19 @@ class State(autoregressive_decoding.State):
 
   @staticmethod
   @typed
-  def initial(log_potentials: Float[Array, "n n"], single_root: bool) -> State:
+  def initial(log_potentials: Float[Array, "n n"], single_root_edge: bool) -> State:
     empty_sample = jnp.empty(log_potentials.shape[-1], dtype=jnp.int32)
     laplacian = _construct_laplacian_hat(log_potentials,
-                                         single_root=single_root)
+                                         single_root_edge=single_root_edge)
     laplacian_invt = jnp.linalg.inv(laplacian).T
     return State(potentials=jnp.exp(log_potentials), laplacian=laplacian,
                  laplacian_invt=laplacian_invt, j=jnp.int32(1),
-                 single_root=single_root, sample=empty_sample)
+                 single_root_edge=single_root_edge, sample=empty_sample)
 
 
 @typed
 def _construct_laplacian_hat(
-    log_potentials: Float[Array, "*batch n n"], single_root: bool
+    log_potentials: Float[Array, "*batch n n"], single_root_edge: bool
     ) -> Float[Array, "*batch n-1 n-1"]:
   """Computes a graph Laplacian-hat matrix as in Koo et al (2007).
   
@@ -313,7 +317,7 @@ def _construct_laplacian_hat(
     Koo et al, 2007: https://aclanthology.org/D07-1015.pdf
   Args:
     log_potentials: Weight matrix with log-potential entries.
-    single_root: Whether to use a single-root constraint
+    single_root_edge: Whether to use a single-root constraint
   Returns:
     Laplacian matrix.
   """
@@ -321,7 +325,7 @@ def _construct_laplacian_hat(
   potentials *= 1-jnp.eye(potentials.shape[-1])  # Removing self-edges
   laplacian = lambda x: x.sum(axis=-2, keepdims=True) * jnp.eye(x.shape[-1]) - x
   cut = lambda x: x[..., 1:, 1:]
-  if single_root:
+  if single_root_edge:
     return laplacian(cut(potentials)).at[..., 0, :].set(potentials[..., 0, 1:])
   else:
     return cut(laplacian(potentials))
@@ -330,7 +334,7 @@ def _construct_laplacian_hat(
 @typed
 def _marginals_with_given_laplacian_invt(
     log_potentials: Float[Array, "*batch n n"],
-    laplacian_invt: Float[Array, "*batch n-1 n-1"], single_root: bool
+    laplacian_invt: Float[Array, "*batch n-1 n-1"], single_root_edge: bool
     ) -> Float[Array, "*batch n n"]:
   """Computes marginals in cases where the inverse of the Laplacian is provided.
 
@@ -347,18 +351,18 @@ def _marginals_with_given_laplacian_invt(
   Args:
     log_potentials: Weight matrix with log-potential entries.
     laplacian_invt: Inverse-transpose of the Laplacian-hat matrix.
-    single_root: Whether to use a single-root constraint.
+    single_root_edge: Whether to use a single-root constraint.
   Returns:
     Matrix of marginals.
   """
-  _, vjp = jax.vjp(partial(_construct_laplacian_hat, single_root=single_root),
-                   log_potentials)
+  _, vjp = jax.vjp(partial(_construct_laplacian_hat,
+                           single_root_edge=single_root_edge), log_potentials)
   return vjp(laplacian_invt)[0]
 
 
 @jax.custom_gradient
 def sample_wilson_numpy_callback(
-    log_potentials: jax.Array, lengths: jax.Array, single_root: bool
+    log_potentials: jax.Array, lengths: jax.Array, single_root_edge: bool
     ) -> jax.Array:
   """JAX-to-Numba callback for vectorized sampling of spanning trees."""
   # The import is located here so that if users do not
@@ -372,7 +376,7 @@ def sample_wilson_numpy_callback(
   f = lambda *x: deptree_non_proj_wilson_sampling.vectorized_sample_wilson(
       *x).astype(jnp.int32)
   trees = jax.pure_callback(f, result_shape, log_potentials, lengths,
-                            single_root, vectorized=True)
+                            single_root_edge, vectorized=True)
   # pytype: disable=bad-return-type
   return (_to_adjacency_matrix(trees),
           lambda g: (jnp.zeros_like(log_potentials), None, None, None))
@@ -381,7 +385,7 @@ def sample_wilson_numpy_callback(
 
 @jax.custom_gradient
 def mst_numpy_callback(log_potentials: jax.Array, lengths: jax.Array,
-                       single_root: bool) -> jax.Array:
+                       single_root_edge: bool) -> jax.Array:
   """JAX-to-Numba callback for vectorized Tarjan's maximum spanning tree."""
   # The import is located here so that if users do not call Numba code the
   # Numba compilation won't be triggered and potential irrelevant
@@ -392,7 +396,7 @@ def mst_numpy_callback(log_potentials: jax.Array, lengths: jax.Array,
   result_shape = jax.ShapeDtypeStruct(log_potentials.shape[:-1], jnp.int32)
   trees = jax.pure_callback(
       lambda *x: deptree_non_proj_argmax.vectorized_mst(*x).astype(jnp.int32),
-      result_shape, log_potentials, lengths, single_root, vectorized=True)
+      result_shape, log_potentials, lengths, single_root_edge, vectorized=True)
   # pytype: disable=bad-return-type
   return (_to_adjacency_matrix(trees),
           lambda g: (jnp.zeros_like(log_potentials), None, None))

@@ -26,8 +26,8 @@ python --version
 # Install dependencies.
 pip install --upgrade pip setuptools wheel
 pip install flake8 pytest-xdist pytest-forked pytype pylint pylint-exit
-pip install -r requirements.txt
 pip install -r requirements-test.txt
+pip install -r requirements.txt
 
 # Lint with flake8.
 flake8 `find synjax -name '*.py' | xargs` --count --select=E9,F63,F70,E225,E251 --show-source --statistics

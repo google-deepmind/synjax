@@ -26,13 +26,13 @@ MTT_LOG_EPS = constants.MTT_LOG_EPS
 
 
 @numba.njit
-def _construct_laplacian_hat(log_potentials: np.ndarray, single_root: bool
+def _construct_laplacian_hat(log_potentials: np.ndarray, single_root_edge: bool
                              ) -> np.ndarray:
   """Computes a graph laplacian matrix.
 
   Args:
     log_potentials: Weight matrix with log-potential entries.
-    single_root: Whether to use a single-root constraint
+    single_root_edge: Whether to use a single-root constraint
   Returns:
     Laplacian matrix.
   """
@@ -43,7 +43,7 @@ def _construct_laplacian_hat(log_potentials: np.ndarray, single_root: bool
     return np.expand_dims(np.sum(x, axis=-2), axis=-2) * np.eye(x.shape[-1]) - x
   def cut(x):  # Removes 0th row and 0th column.
     return x[..., 1:, 1:]
-  if single_root:
+  if single_root_edge:
     l = laplacian(cut(potentials))  # (..., n-1, n-1)
     l[..., 0, :] = potentials[..., 0, 1:]
   else:
@@ -54,7 +54,7 @@ def _construct_laplacian_hat(log_potentials: np.ndarray, single_root: bool
 @numba.njit
 def _marginals_with_given_laplacian_invt(
     log_potentials: np.ndarray, laplacian_invt: np.ndarray,
-    single_root: bool) -> np.ndarray:
+    single_root_edge: bool) -> np.ndarray:
   """Computes marginals in cases where the inverse of the Laplacian is provided.
 
   Based on the presentation in Koo et al 2007
@@ -63,7 +63,7 @@ def _marginals_with_given_laplacian_invt(
   Args:
     log_potentials: Weight matrix with log-potential entries.
     laplacian_invt: Inverse-transpose of the Laplacian-hat matrix.
-    single_root: Whether to use a single-root constraint.
+    single_root_edge: Whether to use a single-root constraint.
   Returns:
     Matrix of marginals.
   """
@@ -71,16 +71,16 @@ def _marginals_with_given_laplacian_invt(
   marginals = np.zeros(potentials.shape)
 
   x = np.diag(laplacian_invt).copy()  # Extract diagonal of laplacian inverse.
-  if single_root:
+  if single_root_edge:
     x[0] = 0
   x_matrix = x.reshape(1, -1)  # (1, n)
 
   y_matrix = laplacian_invt.copy()
-  if single_root:
+  if single_root_edge:
     y_matrix[0] = 0
 
   marginals[1:, 1:] = potentials[1:, 1:] * (x_matrix - y_matrix)
-  if single_root:
+  if single_root_edge:
     marginals[0, 1:] = potentials[0, 1:] * laplacian_invt[0]
   else:
     marginals[0, 1:] = potentials[0, 1:] * np.diag(laplacian_invt)
@@ -89,10 +89,10 @@ def _marginals_with_given_laplacian_invt(
 
 
 @numba.njit
-def _marginals(log_potentials: np.ndarray, single_root):
-  laplacian = _construct_laplacian_hat(log_potentials, single_root)
+def _marginals(log_potentials: np.ndarray, single_root_edge):
+  laplacian = _construct_laplacian_hat(log_potentials, single_root_edge)
   return _marginals_with_given_laplacian_invt(
-      log_potentials, np.linalg.inv(laplacian).T, single_root)
+      log_potentials, np.linalg.inv(laplacian).T, single_root_edge)
 
 
 @numba.njit
@@ -126,12 +126,12 @@ def _sample_wilson_multi_root(log_potentials: np.ndarray):
 
 
 @numba.njit
-def _sample_generalized_wilson(log_potentials: np.ndarray, single_root: bool
-                               ) -> np.ndarray:
+def _sample_generalized_wilson(
+    log_potentials: np.ndarray, single_root_edge: bool) -> np.ndarray:
   """Returns only a single sample spanning tree."""
-  if single_root:
+  if single_root_edge:
     log_potentials = log_potentials.copy()
-    marginals = _marginals(log_potentials, single_root)
+    marginals = _marginals(log_potentials, single_root_edge)
     root_log_marginals = np.log(np.maximum(marginals, 0.0001))[0]
     root_node = np.argmax(root_log_marginals +
                           np.random.gumbel(0, 1, log_potentials.shape[-1]))
@@ -141,20 +141,21 @@ def _sample_generalized_wilson(log_potentials: np.ndarray, single_root: bool
 
 
 @numba.guvectorize("(n,n),(),()->(n)", nopython=True)
-def _vectorized_sample_wilson(log_potentials, length, single_root, res):
+def _vectorized_sample_wilson(log_potentials, length, single_root_edge, res):
   res[:length] = _sample_generalized_wilson(
-      log_potentials[:length, :length], single_root)
+      log_potentials[:length, :length], single_root_edge)
   res[length:] = length
 
 
-def vectorized_sample_wilson(log_potentials, lengths, single_root):
+def vectorized_sample_wilson(log_potentials, lengths, single_root_edge):
   """Vectorized version of wilson algorithm that returns a single sample."""
-  single_root_extended = np.full(log_potentials.shape[:-2], single_root,
-                                 dtype=np.int64)
+  single_root_edge_extended = np.full(
+      log_potentials.shape[:-2], single_root_edge, dtype=np.int64)
   if lengths is None:
     lengths = np.full(log_potentials.shape[:-2], log_potentials.shape[-1])
   out = np.zeros(log_potentials.shape[:-1], dtype=np.int64)
   log_potentials = log_potentials.astype(np.float64)
   lengths = lengths.astype(np.int64)
-  _vectorized_sample_wilson(log_potentials, lengths, single_root_extended, out)
+  _vectorized_sample_wilson(log_potentials, lengths,
+                            single_root_edge_extended, out)
   return out

@@ -27,20 +27,26 @@ from synjax._src.deptree_algorithms import deptree_utils
 from synjax._src.utils import special
 
 
+SpanningTreeProjectiveCRF = (
+    spanning_tree_projective_crf.SpanningTreeProjectiveCRF)
+
+
 class SpanningTreeProjectiveTest(distribution_test.DistributionTest):
 
   def create_random_batched_dists(self, key: jax.random.KeyArray):
     b = 3
     n_words = 5
     log_potentials = jax.random.normal(key, (b, n_words+1, n_words+1))
-    dists = [spanning_tree_projective_crf.SpanningTreeProjectiveCRF(
-        log_potentials=log_potentials, lengths=None, single_root=single_root)
-             for single_root in [True, False]]
+    dists = [SpanningTreeProjectiveCRF(
+        log_potentials=log_potentials, lengths=None,
+        single_root_edge=single_root_edge)
+             for single_root_edge in [True, False]]
     return dists
 
   def create_invalid_shape_distribution(self):
-    return spanning_tree_projective_crf.SpanningTreeProjectiveCRF(
-        log_potentials=jnp.zeros((3, 6, 5)), lengths=None, single_root=True)
+    return SpanningTreeProjectiveCRF(
+        log_potentials=jnp.zeros((3, 6, 5)), lengths=None,
+        single_root_edge=True)
 
   def test_Eisner_and_Kuhlmann_argmax_agree(self):
     for dist in self.create_random_batched_dists(jax.random.PRNGKey(0)):
@@ -53,9 +59,10 @@ class SpanningTreeProjectiveTest(distribution_test.DistributionTest):
     b = 3
     n_words = 5
     log_potentials = jnp.zeros((b, n_words+1, n_words+1))
-    dists = [spanning_tree_projective_crf.SpanningTreeProjectiveCRF(
-        log_potentials=log_potentials, lengths=None, single_root=single_root)
-             for single_root in [True, False]]
+    dists = [SpanningTreeProjectiveCRF(
+        log_potentials=log_potentials, lengths=None,
+        single_root_edge=single_root_edge)
+             for single_root_edge in [True, False]]
     return dists
 
   def analytic_log_count(self, dist) -> jax.Array:
@@ -74,7 +81,7 @@ class SpanningTreeProjectiveTest(distribution_test.DistributionTest):
     """
     def multi_root_projective_log_count(n_words):
       return special.log_comb(3*n_words, n_words) - jnp.log(2*n_words+1)
-    if dist.single_root:
+    if dist.single_root_edge:
       max_n = dist.log_potentials.shape[-1]-1
       first_term = multi_root_projective_log_count(jnp.arange(max_n))
       second_term = multi_root_projective_log_count(
@@ -98,7 +105,7 @@ class SpanningTreeProjectiveTest(distribution_test.DistributionTest):
     n_words = trees.shape[-1]-1
     self.assert_allclose(jnp.diagonal(samples, axis1=-2, axis2=-1), 0)
     self.assert_allclose(samples[..., 0], 0)
-    if dist.single_root:
+    if dist.single_root_edge:
       self.assert_allclose(jnp.count_nonzero(trees[..., 1:], axis=-1),
                            n_words - 1)
 
@@ -108,7 +115,7 @@ class SpanningTreeProjectiveTest(distribution_test.DistributionTest):
         marginals.shape[-1]-1)
     self.assert_allclose(jnp.diagonal(marginals, axis1=-2, axis2=-1), 0)
     self.assert_allclose(marginals[..., 0], 0)
-    if dist.single_root:
+    if dist.single_root_edge:
       self.assert_allclose(jnp.sum(marginals[:, 0, 1:], axis=-1), 1)
 
 

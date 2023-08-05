@@ -30,7 +30,8 @@ from synjax._src.semi_markov_crf import SemiMarkovCRF
 from synjax._src.spanning_tree_crf import SpanningTreeCRF
 
 
-__version__ = "0.1.4"
+__version__ = "2023.8.5"
+
 
 __all__ = (
     "Distribution",
