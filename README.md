@@ -43,8 +43,7 @@ $ pip install git+https://github.com/deepmind/synjax
 
 The [notebooks directory](https://github.com/deepmind/synjax/tree/master/notebooks) contains examples of how Synjax works:
 
-* Introductory notebook demonstrating SynJax functionalities. [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/deepmind/synjax/blob/master/notebooks/examples_of_linear_chain_crf.ipynb)
-* Some visual examples of distributions currently supported by Synjax. [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/deepmind/synjax/blob/master/notebooks/examples_of_distributions.ipynb)
+* Introductory notebook demonstrating SynJax functionalities. [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/deepmind/synjax/blob/master/notebooks/introduction_to_synjax.ipynb)
 
 ## Citing SynJax<a id="citing-synjax"></a>
 
