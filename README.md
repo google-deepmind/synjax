@@ -7,14 +7,14 @@
 
 ## What is SynJax?<a id="what-is-synjax"></a>
 
-SynJax is a neural network library for [JAX] structured probability
+SynJax is a neural network library for [JAX](https://github.com/google/jax) structured probability
 distributions. The distributions that are currently supported are:
 
 * [Linear Chain CRF](https://github.com/deepmind/synjax/tree/master/synjax/_src/linear_chain_crf.py),
 * [Semi-Markov CRF](https://github.com/deepmind/synjax/tree/master/synjax/_src/semi_markov_crf.py),
 * [Constituency Tree CRF](https://github.com/deepmind/synjax/tree/master/synjax/_src/constituency_tree_crf.py),
-* [Spanning Tree CRF](https://github.com/deepmind/synjax/tree/master/synjax/_src/spanning_tree_crf.py) -- including optional constraints for projectivity, (un)directionality and single-rootness,
-* [Alignment CRF](https://github.com/deepmind/synjax/tree/master/synjax/_src/alignment_crf.py) -- including 1-to-many, many-to-many and other more complex monotonic alignment formsr,
+* [Spanning Tree CRF](https://github.com/deepmind/synjax/tree/master/synjax/_src/spanning_tree_crf.py) -- including optional constraints for projectivity, (un)directionality and single root edges,
+* [Alignment CRF](https://github.com/deepmind/synjax/tree/master/synjax/_src/alignment_crf.py) -- including both monotonic (1-to-many, many-to-many and CTC) and non-monotonic (1-to-1) alignments,
 * [PCFG](https://github.com/deepmind/synjax/tree/master/synjax/_src/constituency_pcfg.py),
 * [Tensor-Decomposition PCFG](https://github.com/deepmind/synjax/tree/master/synjax/_src/constituency_tensor_decomposition_pcfg.py),
 * [HMM](https://github.com/deepmind/synjax/tree/master/synjax/_src/hmm.py),
@@ -23,6 +23,8 @@ distributions. The distributions that are currently supported are:
 All these distributions support standard operations such as computing log-probability of a structure, computing marginal probability of a part of the structure, finding most likely structure, sampling, top-k, entropy, cross-entropy, kl-divergence...
 
 All operations support standard JAX transformations `jax.vmap`, `jax.jit`, `jax.pmap` and `jax.grad`. The only exception are argmax, sample and top-k that do not support `jax.grad`.
+
+If you would like to read about the details of SynJax take a look at the [paper](https://arxiv.org/abs/2308.03291).
 
 ## Installation<a id="installation"></a>
 
@@ -47,20 +49,14 @@ The [notebooks directory](https://github.com/deepmind/synjax/tree/master/noteboo
 
 ## Citing SynJax<a id="citing-synjax"></a>
 
-To cite this repository:
+To cite SynJax please use:
 
 ```
-@software{synjax2023github,
-  author = {Stanojevi\'{c}, Milo\v{s} and Sartran, Laurent},
-  title = "{SynJax}",
-  url = {http://github.com/deepmind/synjax},
-  version = {2023.8.5},
-  year = {2023},
+@article{synjax2023,
+      title="{SynJax: Structured Probability Distributions for JAX}",
+      author={Milo\v{s} Stanojevi\'{c} and Laurent Sartran},
+      year={2023},
+      journal={arXiv preprint arXiv:2308.03291},
+      url={https://arxiv.org/abs/2308.03291},
 }
 ```
-
-In this bibtex entry, the version number is intended to be from
-[`synjax/__init__.py`](https://github.com/deepmind/synjax/blob/main/synjax/__init__.py),
-and the year corresponds to the project's open-source release.
-
-[JAX]: https://github.com/google/jax
