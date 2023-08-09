@@ -19,5 +19,5 @@ import typeguard
 
 
 Shape = Tuple[int, ...]
-Key = jaxtyping.UInt32[jaxtyping.Array, "2"]
+Key = jaxtyping.PRNGKeyArray
 typed = lambda fn: jaxtyping.jaxtyped(typeguard.typechecked(fn))
