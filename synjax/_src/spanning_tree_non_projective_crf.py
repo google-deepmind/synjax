@@ -25,7 +25,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float, Int32
 from synjax._src.config import get_config
 from synjax._src.constants import EPS, MTT_LOG_EPS
-from synjax._src.deptree_algorithms import deptree_utils
+from synjax._src.deptree_algorithms import deptree_padding
 from synjax._src.distribution import Distribution
 from synjax._src.typing import Shape, Key, typed
 from synjax._src.utils import autoregressive_decoding
@@ -103,7 +103,7 @@ class SpanningTreeNonProjectiveCRF(Distribution):
       batch_shape = log_potentials.shape[:-2]
       lengths = jnp.full(batch_shape, log_potentials.shape[-1])
     self.lengths = lengths
-    super().__init__(log_potentials=deptree_utils.pad_log_potentials(
+    super().__init__(log_potentials=deptree_padding.pad_log_potentials(
         log_potentials, self.lengths))
 
   @property

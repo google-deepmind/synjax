@@ -16,8 +16,6 @@
 # pylint: disable=g-long-lambda
 import jax
 import jax.numpy as jnp
-import numba
-import numpy as np
 
 from synjax._src import constants
 
@@ -55,74 +53,3 @@ def _mask_for_potentials(max_nodes: int, lengths: Array) -> Array:
   vertical = jnp.arange(max_nodes) < lengths[..., None]
   matrix = vertical[..., None] & horizontal[..., None, :]
   return matrix.at[..., 0].set(False) & ~jnp.eye(max_nodes, dtype=bool)
-
-
-# pylint: disable=g-explicit-length-test
-@numba.njit
-def is_tree(proposal: np.ndarray) -> bool:
-  """Checks if proposal forms a valid spanning tree.
-
-  Linear time algorithm from Stanojević and Cohen (2021).
-
-  References:
-    Stanojević and Cohen, 2021 - Figure 9: https://aclanthology.org/2021.emnlp-main.823.pdf#page=16
-
-  Args:
-    proposal: Numpy array in which element at position i specifies arc
-              proposal[i] -> i.
-  Returns:
-    Boolean for the condition of tree connectedness.
-  """  # pylint: disable=line-too-long
-  n = proposal.shape[0]
-  children = [[1 for _ in range(0)] for _ in range(n)]
-  for i in range(1, n):
-    children[proposal[i]].append(i)
-  is_visited = np.zeros(n, dtype=np.int64)
-  stack = [0]
-  while len(stack) != 0:
-    i = stack.pop()
-    is_visited[i] = True
-    stack.extend(children[i])
-  return is_visited.all()
-
-
-@numba.njit
-def is_projective_tree(proposal):
-  """Checks if proposal forms a valid projective spanning tree.
-
-  Linear time algorithm from Stanojević and Cohen (2021).
-
-  References:
-    Stanojević and Cohen, 2021 - Figure 10: https://aclanthology.org/2021.emnlp-main.823.pdf#page=17
-
-  Args:
-    proposal: Numpy array in which element at position i specifies arc
-              proposal[i] -> i.
-  Returns:
-    Boolean for the condition of projectivity.
-  """  # pylint: disable=line-too-long
-  n = proposal.shape[0]
-  deps_count = np.zeros(n, dtype=np.int64)
-  for i in range(1, n):
-    deps_count[proposal[i]] += 1
-  stack = [0]
-  for i in range(1, n):
-    stack.append(i)
-    while len(stack) > 1:
-      right = stack.pop()
-      left = stack.pop()
-      if proposal[left] == right:
-        # Exists left arc.
-        stack.append(right)
-        deps_count[right] -= 1
-      elif proposal[right] == left and deps_count[right] == 0:
-        # Exists right arc.
-        stack.append(left)
-        deps_count[left] -= 1
-      else:
-        # No attachments possible.
-        # Restore stack and move to next word.
-        stack.append(left)
-        stack.append(right)
-        break
-  return stack == [0]

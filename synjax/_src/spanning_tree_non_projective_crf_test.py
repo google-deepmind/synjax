@@ -23,8 +23,8 @@ import numpy as np
 
 from synjax._src import distribution_test
 from synjax._src import spanning_tree_non_projective_crf
+from synjax._src.deptree_algorithms import deptree_non_proj_argmax
 from synjax._src.deptree_algorithms import deptree_non_proj_wilson_sampling
-from synjax._src.deptree_algorithms import deptree_utils
 
 SpanningTreeNonProjectiveCRF = (
     spanning_tree_non_projective_crf.SpanningTreeNonProjectiveCRF)
@@ -94,7 +94,7 @@ class SpanningTreeNonProjectiveCRFTest(
   def assert_batch_of_valid_samples(self, dist, samples):
     trees = np.asarray(jnp.argmax(samples, -2).reshape(-1, samples.shape[-1]))
     for tree in trees:
-      self.assertTrue(deptree_utils.is_tree(tree))
+      self.assertTrue(deptree_non_proj_argmax.is_tree(tree))
     n_words = trees.shape[-1]-1
     self.assert_allclose(jnp.diagonal(samples, axis1=-2, axis2=-1), 0)
     self.assert_allclose(samples[..., 0], 0)

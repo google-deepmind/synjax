@@ -21,7 +21,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from synjax._src import constants
-from synjax._src.deptree_algorithms import deptree_utils
+from synjax._src.deptree_algorithms import deptree_padding
 
 
 class DepTreeUtilsTest(parameterized.TestCase):
@@ -31,7 +31,8 @@ class DepTreeUtilsTest(parameterized.TestCase):
                                atol=constants.TESTING_ABSOLUTE_TOLERANCE)
 
   def test_mask_for_padding(self):
-    mask = deptree_utils._mask_for_padding(max_nodes=6, lengths=jnp.array([4]))
+    mask = deptree_padding._mask_for_padding(max_nodes=6,
+                                             lengths=jnp.array([4]))
     self.assertTrue(jnp.allclose(
         mask.astype(jnp.int32),
         jnp.array(
@@ -43,8 +44,8 @@ class DepTreeUtilsTest(parameterized.TestCase):
               [0, 0, 0, 0, 0, 0]]])))
 
   def test_mask_for_potentials(self):
-    mask = deptree_utils._mask_for_potentials(max_nodes=6,
-                                              lengths=jnp.array([4]))
+    mask = deptree_padding._mask_for_potentials(max_nodes=6,
+                                                lengths=jnp.array([4]))
     self.assertTrue(jnp.allclose(
         mask.astype(jnp.int32),
         jnp.array(
@@ -57,7 +58,7 @@ class DepTreeUtilsTest(parameterized.TestCase):
 
   def test_pad_log_potentials(self):
     log_potentials = jnp.full((6, 6), 2)
-    mask = deptree_utils.pad_log_potentials(log_potentials, jnp.array([4]))
+    mask = deptree_padding.pad_log_potentials(log_potentials, jnp.array([4]))
     ninf = -constants.INF
     self.assertTrue(jnp.allclose(
         mask.astype(jnp.int32),
