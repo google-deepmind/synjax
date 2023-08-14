@@ -14,11 +14,11 @@ distributions. The distributions that are currently supported are:
 * [Semi-Markov CRF](https://github.com/deepmind/synjax/tree/master/synjax/_src/semi_markov_crf.py),
 * [Constituency Tree CRF](https://github.com/deepmind/synjax/tree/master/synjax/_src/constituency_tree_crf.py),
 * [Spanning Tree CRF](https://github.com/deepmind/synjax/tree/master/synjax/_src/spanning_tree_crf.py) -- including optional constraints for projectivity, (un)directionality and single root edges,
-* [Alignment CRF](https://github.com/deepmind/synjax/tree/master/synjax/_src/alignment_crf.py) -- including both monotonic (1-to-many, many-to-many and CTC) and non-monotonic (1-to-1) alignments,
+* [Alignment CRF](https://github.com/deepmind/synjax/tree/master/synjax/_src/alignment_simple.py) -- including both monotonic (1-to-many and many-to-many) and non-monotonic (1-to-1) alignments,
+* [CTC Alignment](https://github.com/deepmind/synjax/tree/master/synjax/_src/ctc.py).
 * [PCFG](https://github.com/deepmind/synjax/tree/master/synjax/_src/constituency_pcfg.py),
 * [Tensor-Decomposition PCFG](https://github.com/deepmind/synjax/tree/master/synjax/_src/constituency_tensor_decomposition_pcfg.py),
 * [HMM](https://github.com/deepmind/synjax/tree/master/synjax/_src/hmm.py),
-* [CTC](https://github.com/deepmind/synjax/tree/master/synjax/_src/ctc.py).
 
 All these distributions support standard operations such as computing log-probability of a structure, computing marginal probability of a part of the structure, finding most likely structure, sampling, top-k, entropy, cross-entropy, kl-divergence...
 
@@ -49,7 +49,7 @@ The [notebooks directory](https://github.com/deepmind/synjax/tree/master/noteboo
 
 ## Citing SynJax<a id="citing-synjax"></a>
 
-To cite SynJax please use:
+To cite SynJax please use both SynJax paper citation:
 
 ```
 @article{synjax2023,
@@ -60,3 +60,5 @@ To cite SynJax please use:
       url={https://arxiv.org/abs/2308.03291},
 }
 ```
+and the current [DeepMind JAX Ecosystem citation](https://github.com/deepmind/jax/blob/main/deepmind2020jax.txt).
+
