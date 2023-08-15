@@ -16,9 +16,12 @@
 
 import jax
 import jax.numpy as jnp
-
+# pylint: disable=g-importing-member
 from synjax._src.utils.semirings import einsum_builder
+from synjax._src.utils.semirings import LogSemiring
+from synjax._src.utils.semirings import MaxSemiring
 from synjax._src.utils.semirings import Semiring
+
 
 einsum_log = einsum_builder(jax.nn.logsumexp, jnp.add)
 einsum_max = einsum_builder(jnp.max, jnp.add)
@@ -26,6 +29,8 @@ einsum_max = einsum_builder(jnp.max, jnp.add)
 
 __all__ = [
     "Semiring",
+    "MaxSemiring",
+    "LogSemiring",
     "einsum_builder",
     "einsum_log",
     "einsum_max",
