@@ -51,7 +51,7 @@ class GeneralMonotoneAlignmentCRF(SemiringDistribution):
       # otherwise. Tuple type is check explicitly later with isinstance.
       log_potentials_vertical: Optional[Float[Array, "*batch row col"]], *,
       lengths_rows: Optional[Int32[Array, "*batch"]] = None,
-      lengths_cols: Optional[Int32[Array, "*batch"]] = None):
+      lengths_cols: Optional[Int32[Array, "*batch"]] = None, **kwargs):
     """Creates an AlignmentCRF distribution.
 
     Args:
@@ -72,8 +72,10 @@ class GeneralMonotoneAlignmentCRF(SemiringDistribution):
       lengths_rows: Optional jax.Array with the number of rows in each instance.
       lengths_cols: Optional jax.Array with the number of columns in
                     each instance.
+      **kwargs: Arguments for superclass.
     """
-    super().__init__(log_potentials=None, struct_is_isomorphic_to_params=False)
+    super().__init__(log_potentials=None, struct_is_isomorphic_to_params=False,
+                     **kwargs)
     if not isinstance(log_potentials_horizontal, tuple):
       raise ValueError("log_potentials_horizontal must be a tuple.")
     if len(log_potentials_horizontal)+(log_potentials_vertical is not None) < 2:
@@ -101,6 +103,10 @@ class GeneralMonotoneAlignmentCRF(SemiringDistribution):
   @property
   def event_shape(self) -> Shape:
     return self.log_potentials_horizontal[0].shape[-2:]
+
+  @property
+  def _typical_number_of_parts_per_event(self) -> Int32[Array, "*batch"]:
+    return jnp.maximum(self.lengths_rows, self.lengths_cols)
 
   @typed
   def unnormalized_log_prob(self, event: Float[Array, "*samples_batch row col"],

@@ -46,8 +46,9 @@ class TreeCRF(SemiringDistribution):
   def __init__(self,
                log_potentials: Float[Array, "*batch n n label"],
                *,
-               lengths: Optional[Int32[Array, "*batch"]] = None):
-    super().__init__(log_potentials=log_potentials)
+               lengths: Optional[Int32[Array, "*batch"]] = None, **kwargs):
+    super().__init__(log_potentials=log_potentials,
+                     **(dict(struct_is_isomorphic_to_params=True) | kwargs))
     if lengths is None:
       *batch_shape, n = log_potentials.shape[:-2]
       lengths = jnp.full(batch_shape, n)
@@ -56,6 +57,10 @@ class TreeCRF(SemiringDistribution):
   @property
   def event_shape(self) -> Shape:
     return self.log_potentials.shape[-3:]
+
+  @property
+  def _typical_number_of_parts_per_event(self) -> Int32[Array, "*batch"]:
+    return 2*self.lengths-1
 
   @typed
   def _structure_forward(self, base_struct: Float[Array, "n n label"],

@@ -18,34 +18,27 @@ from __future__ import annotations
 # pylint: disable=g-long-lambda
 # pylint: disable=g-importing-member
 # pylint: disable=protected-access
-import functools
-from typing import TypeVar, cast, Optional, Union, Tuple
+import dataclasses
+from functools import partial
+from typing import TypeVar, cast, Optional, Union, Tuple, Literal, Callable
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, Num, PyTree
+import jax.tree_util as jtu
+from jaxtyping import Array, Float, Num, PyTree, Int32
 from synjax._src.constants import INF
 from synjax._src.typing import Key, Shape, typed
+from synjax._src.utils import perturbation_utils
 from synjax._src.utils import semirings
 from synjax._src.utils import special
 
+vmap_ndim = special.vmap_ndim
+grad_ndim = special.grad_ndim
+is_shape = special.is_shape
 
 Self = TypeVar("Self")
 Event = PyTree[Float[Array, "..."]]
 SoftEvent = PyTree[Float[Array, "..."]]
-
-vmap_ndim = special.vmap_ndim
-grad_ndim = special.grad_ndim
-partial = functools.partial
-tree_leaves = jax.tree_util.tree_leaves
-
-prob_clip = partial(jax.tree_map, lambda x: jnp.clip(jnp.nan_to_num(x), 0))
-tlog = partial(jax.tree_map, special.safe_log)
-tmul = partial(jax.tree_map, jnp.multiply)
-tadd = partial(jax.tree_map, jnp.add)
-tsub = partial(jax.tree_map, jnp.subtract)
-tsum_all = lambda x: functools.reduce(jnp.add, map(jnp.sum, tree_leaves(x)))
-is_shape = lambda x: isinstance(x, tuple) and all(isinstance(y, int) for y in x)
 
 
 @typed
@@ -53,13 +46,14 @@ class Distribution(eqx.Module):
   """Abstract base class for all distributions."""
 
   log_potentials: Optional[PyTree[Float[Array, "..."]]]
+  struct_is_isomorphic_to_params: bool = eqx.static_field(default=True)
 
   @typed
   def log_count(self, **kwargs) -> Float[Array, "*batch"]:
     """Log of the count of structures in the support."""
-    replace_fn = lambda x: jnp.where(x <= -INF, -INF, 0)
-    safe_replace_fn = lambda x: replace_fn(x) if eqx.is_inexact_array(x) else x
-    return jax.tree_map(safe_replace_fn, self).log_partition(**kwargs)
+    params, non_params = eqx.partition(self, eqx.is_inexact_array)
+    params = jax.tree_map(lambda x: jnp.where(x <= -INF, -INF, 0), params)
+    return eqx.combine(params, non_params).log_partition(**kwargs)
 
   @property
   def event_shape(self) -> PyTree[int]:
@@ -75,6 +69,10 @@ class Distribution(eqx.Module):
       raise NotImplementedError
 
   @property
+  def _typical_number_of_parts_per_event(self) -> Int32[Array, "*batch"]:
+    raise NotImplementedError
+
+  @property
   def batch_ndim(self):
     return len(self.batch_shape)
 
@@ -85,10 +83,10 @@ class Distribution(eqx.Module):
   @typed
   def sample(self, key: Key, sample_shape: Union[int, Shape] = (), **kwargs
              ) -> Event:
-    """Samples an event.
+    """Unbiased sampling of a structure.
 
     Args:
-      key: KeyArray key or integer seed.
+      key: KeyArray key.
       sample_shape: Additional leading dimensions for sample.
       **kwargs: Additional distribution specific kwargs.
     Returns:
@@ -98,6 +96,111 @@ class Distribution(eqx.Module):
     keys = special.split_key_for_shape(key, sample_shape)
     fn = lambda key: self._single_sample(key=key, **kwargs)
     return vmap_ndim(fn, len(sample_shape))(keys)
+
+  @typed
+  def differentiable_sample(
+      self, key: Key,
+      method: Literal["stochastic-softmax-tricks", "implicit-MLE",
+                      "perturb-and-smoothedDP"],
+      noise: Union[Literal["Sum-of-Gamma", "Gumbel", "None"],
+                   Callable[..., Array]] = "Sum-of-Gamma",
+      temperature: Optional[Float[Array, ""]] = None,
+      sample_shape: Union[int, Shape] = (),
+      implicit_MLE_lr: Optional[Float[Array, ""]] = None,  # pylint: disable=invalid-name
+      dp_smoothing: Literal["softmax", "st-softmax", "sparsemax"] = "softmax",
+      dp_temperature: Union[Float[Array, ""], float] = 1.,
+      sum_of_gamma_s: int = 10,) -> SoftEvent:
+    """Biased differentiable sampling of a structure.
+
+    With this method, with a price of having some bias, we can
+    get differentiable samples. Most of the supported sampling methods are based
+    on some form of perturbation that is followed by a custom decoding method.
+
+    Args:
+      key: PRNGKey for sampling.
+      method: Which of the available methods should be used for producing a
+              differentiable sample. Currently supported are
+              - stochastic-softmax-tricks (Paulus et al, 2021)
+              - implicit-MLE (Niepert et al, 2021).
+              - perturb-and-smoothedDP (Corro and Titov, 2019)
+                and (Mensch and Blondel, 2018).
+      noise: Noise type to use for perturbation. The available options are
+            Sum-of-Gamma, Gumbel and None. A sum of a k Sum-of-Gamma samples
+            approximates a single sample of Gumbel better than a sum of
+            k Gumbel samples. Therefore it is is interesting to use for
+            structures that decompose into k parts.
+            This can also be any Callable that takes key and shape arguments.
+      temperature: Temperature for perturbation. Lower temperature implies being
+                  closer to a peaked distribution.
+      sample_shape: Additional leading dimensions for sample in case multiple
+                    samples are needed.
+      implicit_MLE_lr: Internal learning rate used for Implicit-MLE update.
+                       Niepert et al. refer to it as lambda parameter.
+      dp_smoothing: Method for smoothing max semiring in case
+                    perturb-and-smoothedDP is used as sampling method.
+      dp_temperature: Controls peakiness of the smooth
+                      approximation of the max operator.
+      sum_of_gamma_s: Approximation parameter for Sum-of-Gamma perturbation.
+                      Higher value implies better approximation for the cost
+                      of using more memory and computation.
+    Returns:
+      A sample of shape `sample_shape` + `batch_shape` + `event_shape`.
+    References:
+      Niepert et al, 2021: https://arxiv.org/pdf/2106.01798.pdf
+      Paulus et al, 2021: https://arxiv.org/pdf/2006.08063.pdf
+      Corro and Titov, 2019: https://openreview.net/pdf?id=BJlgNh0qKQ
+      Mensch and Blondel, 2018: https://arxiv.org/pdf/1802.03676.pdf
+    """
+    if temperature is None:
+      temperature = jnp.float32(1.)
+
+    bcast = lambda x: jnp.broadcast_to(x, special.asshape(sample_shape)+x.shape)
+    dist = jax.tree_map(bcast, self)
+
+    if noise == "Sum-of-Gamma":
+      noise_fn = partial(perturbation_utils.sample_sum_of_gamma,
+                         k=dist._typical_number_of_parts_per_event,
+                         s=sum_of_gamma_s)
+    elif noise == "Gumbel":
+      noise_fn = jax.random.gumbel
+    elif noise == "None":
+      noise_fn = lambda key, shape: jnp.zeros(shape)
+    elif isinstance(noise, Callable):
+      noise_fn = noise
+    else:
+      raise NotImplementedError
+
+    if method == "stochastic-softmax-tricks":
+      eta = perturbation_utils.noise_for_pytree(key, noise_fn, dist)
+      noised_dist = special.tscale(1/temperature, special.tadd(dist, eta))
+      return noised_dist.marginals()
+    elif method == "perturb-and-smoothedDP":
+      if not isinstance(dist, SemiringDistribution):
+        raise ValueError(
+            "Perturb-and-SmoothedMAP only supports semiring distributions.")
+      eta = perturbation_utils.noise_for_pytree(key, noise_fn, dist)
+      noised_dist = special.tscale(1/temperature, special.tadd(dist, eta))
+      return noised_dist.argmax(smoothing=dp_smoothing,
+                                temperature=dp_temperature)
+    elif method == "implicit-MLE":
+      if not dist.struct_is_isomorphic_to_params:
+        raise ValueError("Implicit MLE cannot be used with distributions that"
+                         " not isomorphic to with their parameters.")
+      if not hasattr(dist, "log_potentials") or dist.log_potentials is None:
+        raise ValueError("Implicit MLE requires distribution having "
+                         "log_potentials attribute.")
+      if implicit_MLE_lr is None:
+        raise ValueError("Implicit MLE requires specifying implicit_MLE_lr "
+                         "parameter. Probably this distribution is not "
+                         "supported.")
+      def argmax_fn(lp):
+        return dataclasses.replace(dist, log_potentials=lp).argmax()
+      sampling_fn = perturbation_utils.implicit_mle(
+          noise_fn=noise_fn, argmax_fn=argmax_fn,
+          internal_learning_rate=implicit_MLE_lr, temperature=temperature)
+      return sampling_fn(key, dist.log_potentials)
+    else:
+      raise NotImplementedError
 
   @typed
   def log_prob(self, event: Event, **kwargs) -> Float[Array, "*batch"]:
@@ -111,10 +214,10 @@ class Distribution(eqx.Module):
     bcast_ndim = self._bcast_ndim(event)
     f = lambda a, b: jnp.sum(a*b, range(bcast_ndim+self.batch_ndim, a.ndim))
     leaf_sums = jax.tree_map(f, event, self.log_potentials)
-    return vmap_ndim(tsum_all, bcast_ndim+self.batch_ndim)(leaf_sums)
+    return vmap_ndim(special.tsum_all, bcast_ndim+self.batch_ndim)(leaf_sums)
 
   def _bcast_ndim(self, event: Event) -> int:
-    leaf0 = lambda x: tree_leaves(x, is_leaf=is_shape)[0]
+    leaf0 = lambda x: jtu.tree_leaves(x, is_leaf=is_shape)[0]
     return leaf0(event).ndim - len(leaf0(self.event_shape)) - self.batch_ndim
 
   @typed
@@ -126,7 +229,7 @@ class Distribution(eqx.Module):
   def marginals_for_template_variables(self: Self, **kwargs) -> Self:
     """Marginal prob. of template parts (e.g. PCFG rules instead tree nodes)."""
     grad_f = grad_ndim(lambda x: x.log_partition(**kwargs), self.batch_ndim)
-    return prob_clip(grad_f(self))
+    return jax.tree_map(jnp.nan_to_num, grad_f(self))
 
   @typed
   def marginals(self, **kwargs) -> SoftEvent:
@@ -136,7 +239,7 @@ class Distribution(eqx.Module):
   @typed
   def log_marginals(self, **kwargs) -> SoftEvent:
     """Logs of marginal probability of structure's parts."""
-    return tlog(self.marginals(**kwargs))
+    return jax.tree_map(special.safe_log, self.marginals(**kwargs))
 
   @typed
   def argmax(self, **kwargs) -> Event:
@@ -147,9 +250,7 @@ class Distribution(eqx.Module):
     Returns:
       The highest scoring structure and its score. In case of ties some
       distributions return fractional structures (i.e. edges may not be only 0
-      and 1 but any number in between). Those distributions support strict_max
-      parameter that will arbitrarily break the ties and remove fractional
-      structures at a price of needing more compute.
+      and 1 but any number in between).
     """
     return self.argmax_and_max(**kwargs)[0]
 
@@ -162,9 +263,7 @@ class Distribution(eqx.Module):
     Returns:
       The highest scoring structure and its score. In case of ties some
       distributions return fractional structures (i.e. edges may not be only 0
-      and 1 but any number in between). Those distributions support strict_max
-      parameter that will arbitrarily break the ties and remove fractional
-      structures at a price of needing more compute.
+      and 1 but any number in between).
     """
     raise NotImplementedError
 
@@ -208,12 +307,12 @@ class Distribution(eqx.Module):
       The cross entropy `H(self || other_dist)`.
     """  # pylint: disable=line-too-long
     def param_leaves(x):
-      return [y for y in tree_leaves(x) if eqx.is_inexact_array(y)]
+      return [y for y in jtu.tree_leaves(x) if eqx.is_inexact_array(y)]
     p_marginals = param_leaves(self.marginals_for_template_variables(**kwargs))
     q_log_potentials = param_leaves(other)
     q_log_z = other.log_partition(**kwargs)
-    return q_log_z - vmap_ndim(tsum_all, self.batch_ndim
-                               )(tmul(p_marginals, q_log_potentials))
+    return q_log_z - vmap_ndim(special.tsum_all, self.batch_ndim
+                               )(special.tmul(p_marginals, q_log_potentials))
 
   @typed
   def kl_divergence(self: Self, other: Self, **kwargs
@@ -238,8 +337,6 @@ class Distribution(eqx.Module):
 
 class SemiringDistribution(Distribution):
   """Abstract class representing structured distributions based on semirings."""
-
-  struct_is_isomorphic_to_params: bool = eqx.static_field(default=True)
 
   @typed
   def unnormalized_log_prob(self: Self, event: Event, **kwargs
@@ -287,10 +384,13 @@ class SemiringDistribution(Distribution):
     return sr.unwrap(jnp.moveaxis(result, -1, 0))
 
   @typed
-  def argmax_and_max(self, strict_max: Optional[bool] = None, **kwargs
-                     ) -> Tuple[Event, Float[Array, "*batch"]]:
+  def argmax_and_max(
+      self,
+      smoothing: Optional[Literal["softmax", "st-softmax", "sparsemax"]] = None,
+      temperature: float = 1.,
+      **kwargs) -> Tuple[Event, Float[Array, "*batch"]]:
     """Calculates the argmax and max."""
-    sr = semirings.MaxSemiring(strict_max=strict_max)
+    sr = semirings.MaxSemiring(smoothing=smoothing, temperature=temperature)
     def f(base_struct, dist):
       max_score = dist._structure_forward(
           base_struct, sr, key=jax.random.PRNGKey(0), **kwargs)
@@ -308,7 +408,7 @@ class SemiringDistribution(Distribution):
       return sr.unwrap(dist._structure_forward(
           base_struct, sr, key=jax.random.PRNGKey(0), **kwargs))
     m = grad_ndim(f, self.batch_ndim)(self._batched_base_structure(), self)
-    return prob_clip(m)
+    return jax.tree_map(jnp.nan_to_num, m)
 
   @typed
   def _single_sample(self, key: Key, **kwargs) -> Event:

@@ -16,13 +16,17 @@
 import functools
 from typing import List
 from absl.testing import parameterized
+import equinox as eqx
 
 # pylint: disable=g-importing-member
+# pylint: disable=g-multiple-import
+# pylint: disable=g-long-lambda
 import jax
 import jax.numpy as jnp
 import numpy as np
 from synjax._src import constants
-from synjax._src.distribution import Distribution
+from synjax._src.distribution import Distribution, SemiringDistribution
+from synjax._src.utils.special import tsum_all
 
 
 class DistributionTest(parameterized.TestCase):
@@ -211,3 +215,28 @@ class DistributionTest(parameterized.TestCase):
     for dist in self.create_random_batched_dists(jax.random.PRNGKey(0)):
       jax.block_until_ready(f(dist))
       jax.block_until_ready(f(dist))
+
+  def test_differentiable_sample(self, methods=(
+      "implicit-MLE", "stochastic-softmax-tricks", "perturb-and-smoothedDP")):
+    key = jax.random.PRNGKey(0)
+    summarize_fn = lambda x: jnp.sum(x * jax.random.normal(key, x.shape))
+    count_non_zero = lambda x: jnp.count_nonzero(x) * eqx.is_inexact_array(x)
+    for dist in self.create_random_batched_dists(key):
+      for method in methods:
+        if method == "implicit-MLE" and not dist.struct_is_isomorphic_to_params:
+          continue
+
+        if (method == "perturb-and-smoothedDP" and
+            not isinstance(dist, SemiringDistribution)):
+          continue
+
+        with self.subTest(f"{method}"):
+          def loss(x, key):
+            # pylint: disable=cell-var-from-loop
+            sample = x.differentiable_sample(
+                key=key, method=method, sample_shape=2, noise="Sum-of-Gamma",
+                temperature=jnp.float32(10), implicit_MLE_lr=jnp.float32(10))
+            return tsum_all(jax.tree_map(summarize_fn, sample))
+          g = eqx.filter_grad(loss)(dist, key)
+          grad_vals = tsum_all(jax.tree_map(count_non_zero, g))
+          self.assertGreater(grad_vals, 0)

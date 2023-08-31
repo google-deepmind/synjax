@@ -282,6 +282,11 @@ def vectorized_mst(log_potentials: NPArray, lengths: Optional[NPArray],
   """Numpy implementation of MST that supports batch dimension."""
   if lengths is None:
     lengths = np.full(log_potentials.shape[:-2], log_potentials.shape[-1])
+  if log_potentials.shape[:-2] != lengths.shape:
+    raise ValueError(
+        "Batch shape does not match -- possibly vmap axis error?\n",
+        f" got log_potentials.shape={log_potentials.shape} and "
+        f"lengths.shape={lengths.shape}")
   single_root_edge_expanded = np.full(
       log_potentials.shape[:-2], single_root_edge, dtype=np.int64)
   assert log_potentials.shape[:-2] == lengths.shape

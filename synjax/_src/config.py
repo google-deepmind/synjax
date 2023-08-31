@@ -25,7 +25,6 @@ from synjax._src.typing import typed  # pylint: disable=g-importing-member
 class SynJaxConfig():
   """SynJax configuration."""
 
-  use_strict_max: bool = False
   checkpoint_loops: bool = True
   checkpoint_semiring_einsum: bool = True
   # Matrix-Tree Theorem settings

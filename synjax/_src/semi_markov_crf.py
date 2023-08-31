@@ -46,7 +46,7 @@ class SemiMarkovCRF(SemiringDistribution):
 
   @typed
   def __init__(self, log_potentials: Float[Array, "*batch n skip state state"],
-               *, lengths: Optional[Int32[Array, "*batch"]] = None):
+               *, lengths: Optional[Int32[Array, "*batch"]] = None, **kwargs):
     """Constructs Semi-Markov CRF distribution.
 
     References:
@@ -66,8 +66,10 @@ class SemiMarkovCRF(SemiringDistribution):
         Lengths of each entry in the batch. It has the same shape as the batch
         and dtype of jnp.int32. If it's not passed, the maximal length will be
         assumed based on the log_potentials.shape[-4].
+      **kwargs: Arguments for superclass.
     """  # pylint: disable=line-too-long
-    super().__init__(log_potentials=log_potentials)
+    super().__init__(log_potentials=log_potentials,
+                     **(dict(struct_is_isomorphic_to_params=True) | kwargs))
     if lengths is None:
       lengths = jnp.full(self.batch_shape, self.event_shape[0])
     self.lengths = lengths
@@ -75,6 +77,10 @@ class SemiMarkovCRF(SemiringDistribution):
   @property
   def event_shape(self) -> Shape:
     return self.log_potentials.shape[-4:]
+
+  @property
+  def _typical_number_of_parts_per_event(self) -> Int32[Array, "*batch"]:
+    return self.lengths  # This is an upper bound
 
   @typed
   def _structure_forward(

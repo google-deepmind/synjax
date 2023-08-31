@@ -16,7 +16,7 @@
 import abc
 import functools
 import operator
-from typing import Sequence, Optional, Union
+from typing import Sequence, Optional, Union, Literal
 
 import jax
 import jax.numpy as jnp
@@ -125,33 +125,43 @@ class LogSemiring(Semiring):
 
 
 class MaxSemiring(Semiring):
-  """Implements the max semiring (max, +, -inf, 0).
+  """Implements the max semiring (max, +, -inf, 0) with optional smoothing.
 
   Gradients give argmax.
   """
 
-  def __init__(self, strict_max: Optional[bool] = None):
-    if strict_max is None:
-      self._strict_max = get_config().use_strict_max
-    else:
-      self._strict_max = strict_max
+  def __init__(
+      self,
+      smoothing: Optional[Literal["softmax", "st-softmax", "sparsemax"]] = None,
+      temperature: float = 1.0):
+    super().__init__()
+    self.smoothing = smoothing
+    self.temperature = temperature
 
   def sum(self, a: Array, axis: Axis, *, key: Optional[KeyArray] = None
           ) -> Array:
-    if self._strict_max:
-      def _strict_max_fn(x, axis: Axis, *, key: Optional[KeyArray] = None):
-        del key
-        indices = jnp.argmax(x, axis=axis, keepdims=True)
-        vals = jnp.take_along_axis(x, indices, axis)
-        return jnp.squeeze(vals, axis)
-      fn = _wrap_fn_multi_axis_reduce(_strict_max_fn)
-      return fn(a, key=key, axis=axis)
-    else:
+    if self.smoothing is None:
       return jnp.max(a, axis=axis)
+    elif self.smoothing == "softmax":
+      selection = jax.nn.softmax(a / self.temperature, axis=axis)
+      return jnp.sum(selection * a, axis=axis)
+    elif self.smoothing == "st-softmax":
+      selection = special.straight_trough_replace(
+          differentiable_input=jax.nn.softmax(a / self.temperature, axis=axis),
+          non_differentiable_output=special.max_one_hot(a, axis=axis))
+      return jnp.sum(selection * a, axis=axis)
+    elif self.smoothing == "sparsemax":
+      selection = special.sparsemax(a / self.temperature, axis=axis)
+      return jnp.sum(selection * a, axis=axis)
+    else:
+      raise NotImplementedError
 
   def add(self, a: Array, b: Array, *cs: Array, key: Optional[KeyArray] = None
           ) -> Array:
-    return functools.reduce(jnp.maximum, [a, b, *cs])
+    if self.smoothing:
+      return super().add(a, b, *cs, key=key)
+    else:
+      return functools.reduce(jnp.maximum, [a, b, *cs])
 
 
 class KBestSemiring(Semiring):

@@ -15,13 +15,15 @@
 """Generally useful small functions."""
 import functools
 import operator
-from typing import Union, Tuple, Optional, Literal
+from typing import Union, Tuple, Optional, Literal, Any, Sequence
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import jax.tree_util as jtu
 
 from synjax._src import constants
 
+# pylint: disable=g-long-lambda
 
 Array = jax.Array
 Shape = Tuple[int, ...]
@@ -167,7 +169,8 @@ def _tpu_take(x: Array, indices: Array, axis: int = -1) -> Array:
 
 def max_one_hot(x: Array, axis: Union[int, Tuple[int, ...]]) -> Array:
   max_val = jnp.max(x, axis=axis, keepdims=True)
-  return jnp.where(x == max_val, x-jax.lax.stop_gradient(x)+1., 0.)
+  zero = x-jax.lax.stop_gradient(x)
+  return jnp.where(x == max_val, zero+1., 0.)
 
 
 def sample_one_hot(logits: Array, *, key: KeyArray,
@@ -195,9 +198,9 @@ def shape_size(shape: Union[Shape, int]) -> int:
   return functools.reduce(operator.mul, asshape(shape), 1)
 
 
-def vmap_ndim(f, ndim: int):
+def vmap_ndim(f, ndim: int, in_axes: Union[int, None, Sequence[Any]] = 0):
   for _ in range(ndim):
-    f = jax.vmap(f)
+    f = jax.vmap(f, in_axes=in_axes)
   return f
 
 
@@ -205,3 +208,75 @@ def grad_ndim(f, ndim: int, has_aux: bool = False):
   gf = eqx.filter_grad(f, has_aux=has_aux)
   gf = vmap_ndim(gf, ndim)
   return lambda *inputs: jax.tree_map(jnp.nan_to_num, gf(*inputs))
+
+is_shape = lambda x: isinstance(x, tuple) and all(isinstance(y, int) for y in x)
+
+############################################################################
+####  PyTree utils.
+############################################################################
+
+tadd = functools.partial(jax.tree_map, jnp.add)
+tsub = functools.partial(jax.tree_map, jnp.subtract)
+tscale = lambda scalar, tree: jax.tree_map(
+    lambda x: scalar * x if eqx.is_inexact_array(x) else x, tree)
+tlog = functools.partial(jax.tree_map, safe_log)
+tmul = functools.partial(jax.tree_map, jnp.multiply)
+tsum_all = lambda x: functools.reduce(jnp.add, map(jnp.sum, jtu.tree_leaves(x)))
+
+
+############################################################################
+####  Alternative activations.
+############################################################################
+
+
+def straight_trough_replace(differentiable_input, non_differentiable_output):
+  return tadd(jax.lax.stop_gradient(tsub(non_differentiable_output,
+                                         differentiable_input)),
+              non_differentiable_output)
+
+
+def sparsemax(x: Array, axis: Union[int, Shape] = -1) -> Array:
+  """Implements sparsemax activation from Martins and Astudillo (2016).
+  
+  Args:
+    x: Input array.
+    axis: Axis over which to apply sparsemax activation
+  Returns:
+    Array of the same size with target axis projected to probability simplex.
+  References:
+    Martins and Astudillo, 2016: http://proceedings.mlr.press/v48/martins16.pdf
+  """
+
+  @jax.custom_jvp
+  def _sparsemax(x: Array) -> Array:
+    # This sub-function projects the last axis to probability simplex.
+    s = 1.0
+    n_features = x.shape[-1]
+    u = jnp.sort(x, axis=-1)[..., ::-1]
+    cumsum_u = jnp.cumsum(u, axis=-1)
+    ind = jnp.arange(n_features) + 1
+    cond = s / ind + (u - cumsum_u / ind) > 0
+    idx = jnp.count_nonzero(cond, axis=-1, keepdims=True)
+    return jax.nn.relu(s/idx + (x-jnp.take_along_axis(cumsum_u, idx-1, -1)/idx))
+
+  @_sparsemax.defjvp
+  def _sparsemax_jvp(primals: Tuple[Array], tangents: Tuple[Array]
+                    ) -> Tuple[Array, Array]:
+    x, = primals
+    x_dot, = tangents
+    primal_out = _sparsemax(x)
+    supp = primal_out > 0
+    card = jnp.count_nonzero(supp, -1, keepdims=True)
+    tangent_out = supp*x_dot - jnp.sum(supp*x_dot, -1, keepdims=True)/card*supp
+    return primal_out, tangent_out
+
+  if axis == -1:
+    return _sparsemax(x)
+  else:
+    axis = asshape(axis)
+    x1 = jnp.moveaxis(x, axis, range(-len(axis), 0))
+    x2 = jnp.reshape(x1, x1.shape[:-len(axis)] + (-1,))
+    x2b = _sparsemax(x2)
+    x1b = jnp.reshape(x2b, x1.shape)
+    xb = jnp.moveaxis(x1b, range(-len(axis), 0), axis)
+    return xb

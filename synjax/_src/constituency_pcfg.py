@@ -60,8 +60,9 @@ class GeneralizedPCFG(distribution.SemiringDistribution):
       preterminal_scores: Float[Array, "*batch n pt"],
       root: Float[Array, "*batch nt"],
       rule: Float[Array, "*batch nt nt+pt nt+pt"],
-      lengths: Optional[Int32[Array, "*batch"]] = None):
-    super().__init__(log_potentials=None, struct_is_isomorphic_to_params=False)
+      lengths: Optional[Int32[Array, "*batch"]] = None, **kwargs):
+    super().__init__(log_potentials=None,
+                     **(dict(struct_is_isomorphic_to_params=False) | kwargs))
     self.root = jax.nn.log_softmax(root, -1)
     self.rule = jax.nn.log_softmax(rule, (-1, -2))
     self.preterminal_scores = preterminal_scores
@@ -91,6 +92,10 @@ class GeneralizedPCFG(distribution.SemiringDistribution):
   @property
   def batch_shape(self) -> Shape:
     return self.rule.shape[:-3]
+
+  @property
+  def _typical_number_of_parts_per_event(self) -> Int32[Array, "*batch"]:
+    return 2*self.lengths-1
 
   @typed
   def _structure_forward(self, base_struct: Event, semiring: Semiring, key: Key
@@ -170,11 +175,11 @@ class PCFG(GeneralizedPCFG):
                root: Float[Array, "*batch nt"],
                rule: Float[Array, "*batch nt nt+pt nt+pt"],
                word_ids: Int32[Array, "*batch n"],
-               lengths: Optional[Int32[Array, "*batch"]] = None):
+               lengths: Optional[Int32[Array, "*batch"]] = None, **kwargs):
     self.word_ids = word_ids
     self.emission = emission
     emission = jax.nn.log_softmax(emission, -1)
     preterm_scores = jnp.take_along_axis(emission, word_ids[..., None, :], -1)
     preterm_scores = jnp.swapaxes(preterm_scores, -1, -2)
     super().__init__(root=root, rule=rule, lengths=lengths,
-                     preterminal_scores=preterm_scores)
+                     preterminal_scores=preterm_scores, **kwargs)

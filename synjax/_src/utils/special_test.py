@@ -14,6 +14,10 @@
 
 """Tests for synjax._src.utils.general."""
 
+# pylint: disable=g-complex-comprehension
+# pylint: disable=g-importing-member
+
+from functools import partial
 import math
 
 from absl.testing import absltest
@@ -21,20 +25,18 @@ from absl.testing import parameterized
 
 import jax
 import jax.numpy as jnp
+import jaxopt
 import numpy as np
 
 from synjax._src import constants
 from synjax._src.utils import special
 
 
-# pylint: disable=g-complex-comprehension
-
-
 class GeneralTest(parameterized.TestCase):
 
-  def assert_allclose(self, x, y):
-    np.testing.assert_allclose(x, y, rtol=constants.TESTING_RELATIVE_TOLERANCE,
-                               atol=constants.TESTING_ABSOLUTE_TOLERANCE)
+  def assert_allclose(self, x, y, rtol=constants.TESTING_RELATIVE_TOLERANCE,
+                      atol=constants.TESTING_ABSOLUTE_TOLERANCE):
+    np.testing.assert_allclose(x, y, rtol=rtol, atol=atol)
 
   def assert_all(self, x, *, msg=""):
     self.assertTrue(all(map(jnp.all, jax.tree_util.tree_flatten(x)[0])),
@@ -71,29 +73,38 @@ class GeneralTest(parameterized.TestCase):
                          jnp.take(x, indices, axis=axis))
 
   def test_inv(self):
-    grad = lambda ff, **kw: jax.grad(lambda x: jnp.sum(ff(x, **kw)[..., -1]))
+    def summarize_fn(x):
+      # This is a meaningless asymmetric function that produces a scalar.
+      return jnp.sum(x*jax.random.normal(jax.random.PRNGKey(0), x.shape))
+    grad = lambda ff, **kw: jax.grad(lambda x: summarize_fn(ff(x, **kw)))
     n = 20
-    for method in ["qr", "solve"]:
+    for method in ["solve", "qr"]:
+      if method == "solve":
+        assert_allclose = self.assert_allclose
+      else:
+        # Allow lower precision closeness because of no gold standard.
+        assert_allclose = partial(self.assert_allclose, rtol=1e-3, atol=1e-3)
+
       with self.subTest(method):
         matrix = jax.random.uniform(jax.random.PRNGKey(0), (n, n))
-        self.assert_allclose(special.inv(matrix, inv_method=method),
-                             jnp.linalg.inv(matrix))
-        self.assert_allclose(grad(special.inv, inv_method=method)(matrix),
-                             grad(jnp.linalg.inv)(matrix))
+        assert_allclose(special.inv(matrix, inv_method=method),
+                        jnp.linalg.inv(matrix))
+        assert_allclose(grad(special.inv, inv_method=method)(matrix),
+                        grad(jnp.linalg.inv)(matrix))
         matrix = jnp.zeros((n, n))
-        self.assert_allclose(special.inv(matrix, inv_method=method), 0.)
-        self.assert_allclose(grad(special.inv, inv_method=method)(matrix), 0.)
-        self.assert_allclose(special.inv(matrix, inv_method=method,
-                                         test_invertability=True), 0.)
-        self.assert_allclose(grad(special.inv, inv_method=method,
-                                  test_invertability=True)(matrix), 0.)
+        assert_allclose(special.inv(matrix, inv_method=method), 0.)
+        assert_allclose(grad(special.inv, inv_method=method)(matrix), 0.)
+        assert_allclose(special.inv(matrix, inv_method=method,
+                                    test_invertability=True), 0.)
+        assert_allclose(grad(special.inv, inv_method=method,
+                             test_invertability=True)(matrix), 0.)
         self.assert_all(~jnp.isfinite(special.inv(matrix, inv_method=method,
                                                   test_invertability=False)))
         self.assert_all(jnp.isnan(grad(special.inv, inv_method=method,
                                        test_invertability=False)(matrix)))
         matrix = jnp.ones((n, n))
-        self.assert_allclose(special.inv(matrix, inv_method=method), 0.)
-        self.assert_allclose(grad(special.inv, inv_method=method)(matrix), 0.)
+        assert_allclose(special.inv(matrix, inv_method=method), 0.)
+        assert_allclose(grad(special.inv, inv_method=method)(matrix), 0.)
 
   def test_safe_slogdet(self):
     grad = lambda ff: jax.grad(lambda x: ff(x)[1])
@@ -117,6 +128,15 @@ class GeneralTest(parameterized.TestCase):
     self.assert_all(special.safe_log(1) == 0)
     self.assert_all(jax.grad(special.safe_log)(1.) == 1)
     self.assert_all(jax.grad(special.safe_log)(0.) > 1e4)
+
+  def test_sparsemax(self):
+    x = jax.random.normal(jax.random.PRNGKey(0), (10, 5))
+    jaxopt_sparsemax = jax.vmap(jaxopt.projection.projection_simplex)
+    self.assert_allclose(special.sparsemax(x), jaxopt_sparsemax(x))
+    g1 = jax.grad(lambda y: jnp.sum(special.sparsemax(y)[:, 0]))(x)
+    g2 = jax.grad(lambda y: jnp.sum(jaxopt_sparsemax(y)[:, 0]))(x)
+    self.assert_allclose(g1, g2)
+    self.assertGreater(jnp.count_nonzero(g1), 2)
 
 
 if __name__ == "__main__":

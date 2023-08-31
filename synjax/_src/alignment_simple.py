@@ -67,8 +67,8 @@ class AlignmentCRF(Distribution):
   GeneralMonotoneAligmentCRF class.
   """
 
-  _log_potentials: Float[Array, "*batch row col"]
-  _lengths: Int32[Array, "*batch"]
+  lengths_rows: Int32[Array, "*batch"]
+  lengths_cols: Int32[Array, "*batch"]
   _dist: Optional[GeneralMonotoneAlignmentCRF]
   alignment_type: str = eqx.static_field()
 
@@ -78,9 +78,25 @@ class AlignmentCRF(Distribution):
                lengths_cols: Optional[Int32[Array, "*batch"]] = None,
                alignment_type: Literal["monotone_one_to_many",
                                        "monotone_many_to_many",
-                                       "non_monotone_one_to_one"]):
-    super().__init__(log_potentials=None)
-    self._log_potentials = log_potentials
+                                       "non_monotone_one_to_one"], **kwargs):
+    if "_dist" in kwargs:
+      # Ignore _dist kwarg if provided via dataclasses.replace
+      del kwargs["_dist"]
+
+    super().__init__(log_potentials=log_potentials,
+                     **(dict(struct_is_isomorphic_to_params=True) | kwargs))
+    if lengths_rows is not None:
+      self.lengths_rows = lengths_rows
+    else:
+      self.lengths_rows = jnp.full(self.log_potentials.shape[:-2],
+                                   self.log_potentials.shape[-2])
+
+    if lengths_cols is not None:
+      self.lengths_cols = lengths_rows
+    else:
+      self.lengths_cols = jnp.full(self.log_potentials.shape[:-2],
+                                   self.log_potentials.shape[-1])
+
     self.alignment_type = alignment_type
     if (lengths_cols is None and lengths_rows is None
         and alignment_type == "monotone_one_to_many"
@@ -88,11 +104,6 @@ class AlignmentCRF(Distribution):
       raise ValueError("This is a useless distribution because there is "
                        "less than two alignment possible.")
 
-    if lengths_rows is not None:
-      self._lengths = lengths_rows
-    else:
-      self._lengths = jnp.full(log_potentials.shape[:-2],
-                               log_potentials.shape[-1])
     if alignment_type == "monotone_one_to_many":
       self._dist = GeneralMonotoneAlignmentCRF(
           log_potentials_horizontal=(log_potentials, log_potentials),
@@ -114,11 +125,15 @@ class AlignmentCRF(Distribution):
 
   @property
   def event_shape(self) -> Shape:
-    return self._log_potentials.shape[-2:]
+    return self.log_potentials.shape[-2:]
 
   @property
   def batch_shape(self) -> Shape:
-    return self._log_potentials.shape[:-2]
+    return self.log_potentials.shape[:-2]
+
+  @property
+  def _typical_number_of_parts_per_event(self) -> Int32[Array, "*batch"]:
+    return self.lengths_rows
 
   @typed
   def sample(self, key: Key, sample_shape: Union[Shape, int] = (), **kwargs
@@ -129,6 +144,10 @@ class AlignmentCRF(Distribution):
           "Instead, you can try perturb-and-map by injecting the noise.")
     else:
       return self._dist.sample(key=key, sample_shape=sample_shape, **kwargs)
+
+  @typed
+  def differentiable_sample(self, **kwargs) -> Float[Array, "*batch n m"]:
+    return super().differentiable_sample(**kwargs)
 
   @typed
   def normalize_log_probs(self, scores: Float[Array, "*b"]
@@ -152,7 +171,7 @@ class AlignmentCRF(Distribution):
   def unnormalized_log_prob(self, event: Float[Array, "*b n m"], **kwargs
                             ) -> Float[Array, "*b"]:
     if self.alignment_type == "non_monotone_one_to_one":
-      return jnp.einsum("...ij,...ij->...", event, self._log_potentials)
+      return jnp.einsum("...ij,...ij->...", event, self.log_potentials)
     else:
       return self._dist.unnormalized_log_prob(event, **kwargs)
 
@@ -184,8 +203,8 @@ class AlignmentCRF(Distribution):
   @typed
   def argmax(self, **kwargs) -> Float[Array, "*batch n m"]:
     if self.alignment_type == "non_monotone_one_to_one":
-      return _jax_non_monotone_align_callback(self._log_potentials,
-                                              self._lengths)
+      return _jax_non_monotone_align_callback(self.log_potentials,
+                                              self.lengths_rows)
     else:
       return self._dist.argmax(**kwargs)
 

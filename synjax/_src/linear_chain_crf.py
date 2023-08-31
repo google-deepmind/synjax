@@ -62,7 +62,8 @@ class LinearChainCRF(SemiringDistribution):
         will be assumed based on the log_potentials.shape[-3].
       **kwargs: Additional optional args to pass to superclass constructors.
     """
-    super().__init__(log_potentials=log_potentials, **kwargs)
+    super().__init__(log_potentials=log_potentials,
+                     **(dict(struct_is_isomorphic_to_params=True) | kwargs))
     if lengths is None:
       lengths = jnp.full(self.batch_shape, self.event_shape[0])
     self.lengths = lengths
@@ -70,6 +71,10 @@ class LinearChainCRF(SemiringDistribution):
   @property
   def event_shape(self):
     return self.log_potentials.shape[-3:]
+
+  @property
+  def _typical_number_of_parts_per_event(self) -> Int32[Array, "*batch"]:
+    return self.lengths
 
   @typed
   def _structure_forward(

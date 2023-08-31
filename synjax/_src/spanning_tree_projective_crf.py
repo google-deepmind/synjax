@@ -43,17 +43,22 @@ class SpanningTreeProjectiveCRF(SemiringDistribution):
   def __init__(self, log_potentials: Float[Array, "*batch n n"],
                *,
                single_root_edge: bool,
-               lengths: Optional[Int32[Array, "*batch"]] = None):
+               lengths: Optional[Int32[Array, "*batch"]] = None,
+               **kwargs):
     self.single_root_edge = single_root_edge
     if lengths is None:
       lengths = jnp.full(log_potentials.shape[:-2], log_potentials.shape[-1])
     self.lengths = lengths
     super().__init__(log_potentials=deptree_padding.pad_log_potentials(
-        log_potentials, self.lengths))
+        log_potentials, self.lengths), **kwargs)
 
   @property
   def event_shape(self) -> Shape:
     return self.log_potentials.shape[-2:]
+
+  @property
+  def _typical_number_of_parts_per_event(self) -> Int32[Array, "*batch"]:
+    return self.lengths-1
 
   @typed
   def _structure_forward(

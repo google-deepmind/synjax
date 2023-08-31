@@ -130,9 +130,44 @@ class SemiringsTest(parameterized.TestCase):
     self.assert_allclose(sr.mul(a, b), a + b)
 
     # Test sum.
-    logsumexp = jax.scipy.special.logsumexp
+    logsumexp = jax.nn.logsumexp
     self.assert_allclose(sr.sum(a, -1), logsumexp(a, -1))
     self.assert_allclose(sr.sum(a, -2), logsumexp(a, -2))
+
+    # Test grad.
+    g = jax.grad(lambda x: sr.sum(x, axis=(-1, -2, -3)))(a)
+    self.assertGreater(jnp.count_nonzero(g), 1)
+
+  def test_max_semiring(self):
+    sr = semirings.MaxSemiring()
+    a = jax.random.uniform(jax.random.PRNGKey(0), (34, 12, 32))
+    b = jax.random.uniform(jax.random.PRNGKey(1), (34, 12, 32))
+
+    # Test wrap/unwrap.
+    a_wrapped = sr.wrap(a)
+    self.assertEqual(a_wrapped.shape, (1,) + a.shape)
+    a_unwrapped = sr.unwrap(a_wrapped)
+    self.assertEqual(a_unwrapped.shape, a.shape)
+
+    # Test mul.
+    self.assert_allclose(sr.mul(a, b), a + b)
+
+    # Test add.
+    self.assert_allclose(sr.add(a, b), jnp.maximum(a, b))
+
+    # Test sum.
+    self.assert_allclose(sr.sum(a, -1), jnp.max(a, -1))
+    self.assert_allclose(sr.sum(a, -2), jnp.max(a, -2))
+
+    # Test grad.
+    for smoothing in [None, "softmax", "st-softmax", "sparsemax"]:
+      # pylint: disable=cell-var-from-loop
+      sr = semirings.MaxSemiring(smoothing=smoothing)
+      g = jax.grad(lambda x: sr.sum(x, axis=(-1, -2, -3)))(a)
+      if smoothing:
+        self.assertGreater(jnp.count_nonzero(g), 1)
+      else:
+        self.assertEqual(jnp.count_nonzero(g), 1)
 
 
 if __name__ == "__main__":

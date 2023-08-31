@@ -89,8 +89,9 @@ class GeneralizedTensorDecompositionPCFG(SemiringDistribution):
                nt_to_rank: Float[Array, "*batch nt rank"],
                rank_to_left_nt: Float[Array, "*batch rank nt+pt"],
                rank_to_right_nt: Float[Array, "*batch rank nt+pt"],
-               lengths: Optional[Int32[Array, "*batch"]] = None):
-    super().__init__(log_potentials=None, struct_is_isomorphic_to_params=False)
+               lengths: Optional[Int32[Array, "*batch"]] = None, **kwargs):
+    super().__init__(log_potentials=None,
+                     **(dict(struct_is_isomorphic_to_params=False) | kwargs))
     normalize = functools.partial(jax.nn.log_softmax, axis=-1)
     self.preterminal_scores = preterminal_scores
     self.root = normalize(root)
@@ -116,6 +117,10 @@ class GeneralizedTensorDecompositionPCFG(SemiringDistribution):
   @property
   def batch_shape(self) -> Shape:
     return self.root.shape[:-1]
+
+  @property
+  def _typical_number_of_parts_per_event(self) -> Int32[Array, "*batch"]:
+    return 2*self.lengths-1
 
   @typed
   def _structure_forward(self, base_struct: Event, semiring: Semiring, key: Key
@@ -211,7 +216,7 @@ class TensorDecompositionPCFG(GeneralizedTensorDecompositionPCFG):
                rank_to_left_nt: Float[Array, "*batch rank nt+pt"],
                rank_to_right_nt: Float[Array, "*batch rank nt+pt"],
                word_ids: Int32[Array, "*batch n"],
-               lengths: Optional[Int32[Array, "*batch"]] = None):
+               lengths: Optional[Int32[Array, "*batch"]] = None, **kwargs):
     """Constructs standard version of Tensor-Decomposition PCFG."""
     self.word_ids = word_ids
     self.emission = emission
@@ -221,4 +226,4 @@ class TensorDecompositionPCFG(GeneralizedTensorDecompositionPCFG):
     super().__init__(
         root=root, nt_to_rank=nt_to_rank, rank_to_left_nt=rank_to_left_nt,
         rank_to_right_nt=rank_to_right_nt, lengths=lengths,
-        preterminal_scores=preterm_scores)
+        preterminal_scores=preterm_scores, **kwargs)

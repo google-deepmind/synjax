@@ -97,14 +97,17 @@ class SpanningTreeNonProjectiveCRF(Distribution):
                log_potentials: Float[Array, "*batch n n"],
                *,
                single_root_edge: bool,
-               lengths: Optional[Int32[Array, "*batch"]] = None):
+               lengths: Optional[Int32[Array, "*batch"]] = None,
+               **kwargs):
     self.single_root_edge = single_root_edge
     if lengths is None:
       batch_shape = log_potentials.shape[:-2]
       lengths = jnp.full(batch_shape, log_potentials.shape[-1])
     self.lengths = lengths
-    super().__init__(log_potentials=deptree_padding.pad_log_potentials(
-        log_potentials, self.lengths))
+    super().__init__(
+        log_potentials=deptree_padding.pad_log_potentials(log_potentials,
+                                                          self.lengths),
+        **kwargs)
 
   @property
   def event_shape(self) -> Shape:
@@ -114,6 +117,10 @@ class SpanningTreeNonProjectiveCRF(Distribution):
   def max_nodes(self) -> int:
     # Maximal number of nodes including ROOT node at position 0.
     return self.log_potentials.shape[-1]
+
+  @property
+  def _typical_number_of_parts_per_event(self) -> Int32[Array, "*batch"]:
+    return self.lengths-1
 
   @typed
   def argmax(self, **ignored_args) -> Float[Array, "*batch n n"]:

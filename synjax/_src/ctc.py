@@ -45,9 +45,9 @@ class CTC(SemiringDistribution):
       labels: Int32[Array, "*batch labels"], *,
       label_lengths: Optional[Int32[Array, "*batch"]] = None,
       input_lengths: Optional[Int32[Array, "*batch"]] = None,
-      blank_id: int = 0):
+      blank_id: int = 0, **kwargs):
     super().__init__(log_potentials=log_potentials,
-                     struct_is_isomorphic_to_params=False)
+                     **(dict(struct_is_isomorphic_to_params=False) | kwargs))
 
     # Inserts blank_id as first symbol, last symbol, and in between all words.
     self.labels_extended = jnp.full(
@@ -75,6 +75,10 @@ class CTC(SemiringDistribution):
   @property
   def event_shape(self) -> Shape:
     return self.labels_extended.shape[-1], self.log_potentials.shape[-2]
+
+  @property
+  def _typical_number_of_parts_per_event(self) -> Int32[Array, "*batch"]:
+    return self.input_lengths
 
   @typed
   def _structure_forward(

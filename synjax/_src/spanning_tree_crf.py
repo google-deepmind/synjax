@@ -147,6 +147,14 @@ class SpanningTreeCRF(Distribution):
     return samples
 
   @typed
+  def differentiable_sample(self, **kwargs,) -> Float[Array, "... n n"]:
+    samples = self._dist.differentiable_sample(**kwargs)
+    if not self.directed:
+      samples = samples + jnp.swapaxes(samples, -2, -1)
+    samples = self._remove_padding(samples)
+    return samples
+
+  @typed
   def normalize_log_probs(self, scores: Float[Array, "*b"]
                           ) -> Float[Array, "*b"]:
     return self._dist.normalize_log_probs(scores)
