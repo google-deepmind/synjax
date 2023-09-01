@@ -25,7 +25,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
-from jaxtyping import Array, Float, Num, PyTree, Int32
+from jaxtyping import Array, ArrayLike, Float, Num, PyTree, Int32
 from synjax._src.constants import INF
 from synjax._src.typing import Key, Shape, typed
 from synjax._src.utils import perturbation_utils
@@ -104,11 +104,11 @@ class Distribution(eqx.Module):
                       "perturb-and-smoothedDP"],
       noise: Union[Literal["Sum-of-Gamma", "Gumbel", "None"],
                    Callable[..., Array]] = "Sum-of-Gamma",
-      temperature: Optional[Float[Array, ""]] = None,
+      temperature: Float[ArrayLike, ""] = 1.,
       sample_shape: Union[int, Shape] = (),
-      implicit_MLE_lr: Optional[Float[Array, ""]] = None,  # pylint: disable=invalid-name
+      implicit_MLE_lr: Float[ArrayLike, ""] = 1.,  # pylint: disable=invalid-name
       dp_smoothing: Literal["softmax", "st-softmax", "sparsemax"] = "softmax",
-      dp_temperature: Union[Float[Array, ""], float] = 1.,
+      dp_temperature: Float[ArrayLike, ""] = 1.,
       sum_of_gamma_s: int = 10,) -> SoftEvent:
     """Biased differentiable sampling of a structure.
 
@@ -151,9 +151,6 @@ class Distribution(eqx.Module):
       Corro and Titov, 2019: https://openreview.net/pdf?id=BJlgNh0qKQ
       Mensch and Blondel, 2018: https://arxiv.org/pdf/1802.03676.pdf
     """
-    if temperature is None:
-      temperature = jnp.float32(1.)
-
     bcast = lambda x: jnp.broadcast_to(x, special.asshape(sample_shape)+x.shape)
     dist = jax.tree_map(bcast, self)
 
