@@ -39,6 +39,7 @@ class SynJaxConfig():
   # Linear-Chain CRF settings
   linear_chain_crf_forward_algorithm: Literal["sequential", "parallel"] = (
       "sequential")
+  sum_of_gamma_s = 10  # Sum-of-Gamma approximation parameter.
 
 
 _config = SynJaxConfig()

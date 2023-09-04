@@ -122,7 +122,7 @@ class TensorDecompositionPCFGTest(distribution_test.DistributionTest):
     pass
 
   def test_differentiable_sample(self):
-    super().test_differentiable_sample(methods=("stochastic-softmax-tricks",))
+    super().test_differentiable_sample(methods=("Perturb-and-Marginals",))
 
   def test_mbr(self):
     for dist in self.create_random_batched_dists(jax.random.PRNGKey(0)):

@@ -174,9 +174,25 @@ def max_one_hot(x: Array, axis: Union[int, Tuple[int, ...]]) -> Array:
 
 
 def sample_one_hot(logits: Array, *, key: KeyArray,
-                   axis: Union[int, Tuple[int, ...]] = -1) -> Array:
+                   axis: Union[int, Tuple[int, ...]] = -1,
+                   relaxation: Optional[Literal["Gumbel-Softmax",
+                                                "ST-Gumbel-Softmax"]]) -> Array:
+  """Returns sampled vector from the input for a given key."""
   noise = jax.random.gumbel(key, logits.shape)
-  return max_one_hot(logits + noise, axis)
+  perturbed = logits + noise
+  if relaxation == "ST-Gumbel-Softmax":
+    # ST-Gumbel-Softmax
+    soft = jax.nn.softmax(perturbed, axis=axis)
+    hard = max_one_hot(perturbed, axis)
+    return straight_through_replace(soft, hard)
+  elif relaxation == "Gumbel-Softmax":
+    # Gumbel-Softmax
+    return jax.nn.softmax(perturbed, axis=axis)
+  elif relaxation is None:
+    # Gumbel-Max
+    return max_one_hot(perturbed, axis)
+  else:
+    raise NotImplementedError
 
 
 ############################################################################
@@ -217,11 +233,17 @@ is_shape = lambda x: isinstance(x, tuple) and all(isinstance(y, int) for y in x)
 
 tadd = functools.partial(jax.tree_map, jnp.add)
 tsub = functools.partial(jax.tree_map, jnp.subtract)
-tscale = lambda scalar, tree: jax.tree_map(
-    lambda x: scalar * x if eqx.is_inexact_array(x) else x, tree)
 tlog = functools.partial(jax.tree_map, safe_log)
 tmul = functools.partial(jax.tree_map, jnp.multiply)
 tsum_all = lambda x: functools.reduce(jnp.add, map(jnp.sum, jtu.tree_leaves(x)))
+
+
+def tscale_inexact_arrays(scalar: Union[float, Array], tree):
+  if isinstance(scalar, float) and scalar == 1.:
+    return tree
+  else:
+    return jax.tree_map(lambda x: scalar * x if eqx.is_inexact_array(x) else x,
+                        tree)
 
 
 ############################################################################
@@ -229,7 +251,11 @@ tsum_all = lambda x: functools.reduce(jnp.add, map(jnp.sum, jtu.tree_leaves(x)))
 ############################################################################
 
 
-def straight_trough_replace(differentiable_input, non_differentiable_output):
+def straight_through_replace(differentiable_input, non_differentiable_output):
+  """Replaces value and passes trough the gradient."""
+  if jax.tree_map(lambda x: x.shape, differentiable_input) != jax.tree_map(
+      lambda x: x.shape, non_differentiable_output):
+    raise ValueError("Shapes for straight-through replacement don't match.")
   return tadd(jax.lax.stop_gradient(tsub(non_differentiable_output,
                                          differentiable_input)),
               non_differentiable_output)
@@ -237,7 +263,7 @@ def straight_trough_replace(differentiable_input, non_differentiable_output):
 
 def sparsemax(x: Array, axis: Union[int, Shape] = -1) -> Array:
   """Implements sparsemax activation from Martins and Astudillo (2016).
-  
+
   Args:
     x: Input array.
     axis: Axis over which to apply sparsemax activation

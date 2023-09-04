@@ -17,22 +17,23 @@
 # pylint: disable=g-importing-member
 # pylint: disable=g-long-lambda
 
-from typing import Union, Callable
+from functools import partial
+from typing import Union, Callable, Literal
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, PyTree
 from synjax._src.typing import Key, Shape, typed
-from synjax._src.utils.special import tadd, tsub, tscale
+from synjax._src.utils.special import tadd, tsub, tscale_inexact_arrays
 
 
 @typed
 def sample_sum_of_gamma(key: Key, shape: Shape, k: Union[int, jax.Array],
                         s: int = 10) -> Float[Array, "..."]:
   """Decomposition of Gumbel distribution into k sub-parts from Niepert et al.
-  
+
   Adding k of Sum-of-Gamma independent samples produces 1 Gumbel sample.
-  
+
   Args:
     key: PRNGKey for sampling.
     shape: Shape of the returned sample.
@@ -41,7 +42,7 @@ def sample_sum_of_gamma(key: Key, shape: Shape, k: Union[int, jax.Array],
        Higher value implies better approximation for the cost of using
        more memory and computation.
   Returns:
-    A sample from Sum-of-Gamma distribution. 
+    A sample from Sum-of-Gamma distribution.
   References:
     Niepert et al, 2021: https://arxiv.org/pdf/2106.01798.pdf#page=6
   """
@@ -52,6 +53,24 @@ def sample_sum_of_gamma(key: Key, shape: Shape, k: Union[int, jax.Array],
   samples = jax.random.gamma(key, alpha, shape + (s,)) * beta
   samples = (jnp.sum(samples, axis=-1) - jnp.log(s)) / k
   return samples
+
+
+@typed
+def build_noise_fn(
+    noise: Union[Literal["Sum-of-Gamma", "Gumbel", "None"],
+                 Callable[..., Array]],
+    parts: int, sum_of_gamma_s: int) -> Callable[[Key, Shape], PyTree]:
+  """Builds function that for a given key and shape produces noise sample."""
+  if noise == "Sum-of-Gamma":
+    return partial(sample_sum_of_gamma, k=parts, s=sum_of_gamma_s)
+  elif noise == "Gumbel":
+    return jax.random.gumbel
+  elif noise == "None":
+    return lambda key, shape: jnp.zeros(shape)
+  elif isinstance(noise, Callable):
+    return noise
+  else:
+    raise NotImplementedError
 
 
 @typed
@@ -76,7 +95,7 @@ def implicit_mle(*, noise_fn, argmax_fn: Callable[[PyTree], PyTree],
 
   Implicit MLE allows for flow of gradient trough discrete structure sampled by
   perturbation. Show in Algorithm 1 in Niepert et al (2021).
-  
+
   Args:
     noise_fn: Noise function that accepts key and shape parameters.
     argmax_fn: Argmax function.
@@ -93,12 +112,13 @@ def implicit_mle(*, noise_fn, argmax_fn: Callable[[PyTree], PyTree],
   def sampling(key: Key, theta: PyTree) -> PyTree:
     return argmax_fn(tadd(theta, noise_for_pytree(key, noise_fn, theta)))
   def sampling_forward(key: Key, theta: PyTree) -> PyTree:
-    eta = tscale(temperature, noise_for_pytree(key, noise_fn, theta))
+    eta = tscale_inexact_arrays(temperature,
+                                noise_for_pytree(key, noise_fn, theta))
     z_hat = argmax_fn(tadd(theta, eta))
     return z_hat, (eta, theta, z_hat)
   def sampling_backward(residuals, g) -> PyTree:
     eta, theta, z_hat = residuals
-    theta_hat = tsub(theta, tscale(internal_learning_rate, g))
+    theta_hat = tsub(theta, tscale_inexact_arrays(internal_learning_rate, g))
     return None, tsub(z_hat, argmax_fn(tadd(theta_hat, eta)))
   sampling.defvjp(sampling_forward, sampling_backward)
   return sampling

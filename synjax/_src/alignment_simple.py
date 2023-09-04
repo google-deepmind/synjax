@@ -141,7 +141,8 @@ class AlignmentCRF(Distribution):
     if self.alignment_type == "non_monotone_one_to_one":
       raise NotImplementedError(
           "Non-monotone distribution doesn't support sampling.\n"
-          "Instead, you can try perturb-and-map by injecting the noise.")
+          "Instead, you can try differentiable sampling with "
+          "Perturb-and-MAP-Implicit-MLE.")
     else:
       return self._dist.sample(key=key, sample_shape=sample_shape, **kwargs)
 

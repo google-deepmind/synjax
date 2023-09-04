@@ -18,7 +18,7 @@ from __future__ import annotations
 # pylint: disable=g-long-lambda
 # pylint: disable=g-importing-member
 # pylint: disable=protected-access
-import dataclasses
+from dataclasses import replace
 from functools import partial
 from typing import TypeVar, cast, Optional, Union, Tuple, Literal, Callable
 import equinox as eqx
@@ -26,6 +26,7 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 from jaxtyping import Array, ArrayLike, Float, Num, PyTree, Int32
+from synjax._src.config import get_config
 from synjax._src.constants import INF
 from synjax._src.typing import Key, Shape, typed
 from synjax._src.utils import perturbation_utils
@@ -81,35 +82,68 @@ class Distribution(eqx.Module):
     raise NotImplementedError
 
   @typed
-  def sample(self, key: Key, sample_shape: Union[int, Shape] = (), **kwargs
-             ) -> Event:
+  def sample(self, key: Key, sample_shape: Union[int, Shape] = (),
+             temperature: Float[ArrayLike, ""] = 1., **kwargs) -> Event:
     """Unbiased sampling of a structure.
 
     Args:
       key: KeyArray key.
       sample_shape: Additional leading dimensions for sample.
+      temperature: Sampling temperature.
       **kwargs: Additional distribution specific kwargs.
     Returns:
       A sample of shape `sample_shape` + `batch_shape` + `event_shape`.
     """
     sample_shape = special.asshape(sample_shape)
     keys = special.split_key_for_shape(key, sample_shape)
-    fn = lambda key: self._single_sample(key=key, **kwargs)
+    dist = self.with_temperature(temperature)
+    fn = lambda key: dist._single_sample(key=key, **kwargs)
     return vmap_ndim(fn, len(sample_shape))(keys)
+
+  def with_temperature(self: Self, temperature: Float[ArrayLike, ""] = 1.
+                       ) -> Self:
+    return special.tscale_inexact_arrays(1/temperature, self)
+
+  @typed
+  def with_perturbation(
+      self: Self,
+      key: Key,
+      noise: Union[Literal["Sum-of-Gamma", "Gumbel", "None"],
+                   Callable[..., Array]],
+      temperature: Float[ArrayLike, ""]) -> Self:
+    eta = perturbation_utils.noise_for_pytree(key, self._noise_fn(noise), self)
+    return special.tadd(self, eta).with_temperature(temperature)
+
+  def _noise_fn(
+      self, noise: Union[Literal["Sum-of-Gamma", "Gumbel", "None"],
+                         Callable[..., Array]]) -> Callable[..., Array]:
+    if noise == "Sum-of-Gamma":
+      return partial(perturbation_utils.sample_sum_of_gamma,
+                     k=self._typical_number_of_parts_per_event,
+                     s=get_config().sum_of_gamma_s)
+    elif noise == "Gumbel":
+      return jax.random.gumbel
+    elif noise == "None":
+      return lambda key, shape: jnp.zeros(shape)
+    elif isinstance(noise, Callable):
+      return noise
+    else:
+      raise NotImplementedError
 
   @typed
   def differentiable_sample(
       self, key: Key,
-      method: Literal["stochastic-softmax-tricks", "implicit-MLE",
-                      "perturb-and-smoothedDP"],
+      *,
+      method: Literal["Perturb-and-Marginals", "Perturb-and-SoftmaxDP",
+                      "Perturb-and-SparsemaxDP", "Perturb-and-MAP-Implicit-MLE",
+                      "Gumbel-CRF"],
       noise: Union[Literal["Sum-of-Gamma", "Gumbel", "None"],
                    Callable[..., Array]] = "Sum-of-Gamma",
       temperature: Float[ArrayLike, ""] = 1.,
       sample_shape: Union[int, Shape] = (),
+      straight_through: bool = False,
       implicit_MLE_lr: Float[ArrayLike, ""] = 1.,  # pylint: disable=invalid-name
-      dp_smoothing: Literal["softmax", "st-softmax", "sparsemax"] = "softmax",
-      dp_temperature: Float[ArrayLike, ""] = 1.,
-      sum_of_gamma_s: int = 10,) -> SoftEvent:
+      ) -> SoftEvent:
     """Biased differentiable sampling of a structure.
 
     With this method, with a price of having some bias, we can
@@ -120,80 +154,89 @@ class Distribution(eqx.Module):
       key: PRNGKey for sampling.
       method: Which of the available methods should be used for producing a
               differentiable sample. Currently supported are
-              - stochastic-softmax-tricks (Paulus et al, 2021)
-              - implicit-MLE (Niepert et al, 2021).
-              - perturb-and-smoothedDP (Corro and Titov, 2019)
-                and (Mensch and Blondel, 2018).
+              - Perturb-and-Marginals -- the same as Stochastic-Softmax-Tricks
+                from (Paulus et al, 2021) which applies weight perturbations
+                before computing marginals.
+              - Perturb-and-SoftmaxDP (Corro and Titov, 2019) is using
+                perturbation of weights followed by a smoothed dynamic
+                programming by (Mensch and Blondel, 2018) with negative-entropy
+                smoothing which is the same as replacing argmax with softmax.
+              - Perturb-and-SparsemaxDP -- essentially the same as
+                Perturb-and-SoftmaxDP but with squared-L2 smoothing from
+                (Mensch and Blondel, 2018) which amounts to using sparsemax from
+                (Martins and Astudillo, 2016) as an approximate argmax.
+              - Perturb-and-MAP-Implicit-MLE (Niepert et al, 2021) does
+                perturbed argmax decoding with a custom backward step that
+                projects structure's gradient to a new structure.
+              - Gumbel-CRF is from (Fu et al 2020) and reparametrizes the
+                backward step of Forward-Filtering Backward-Sampling by using
+                Gumbel-Softmax trick.
       noise: Noise type to use for perturbation. The available options are
-            Sum-of-Gamma, Gumbel and None. A sum of a k Sum-of-Gamma samples
-            approximates a single sample of Gumbel better than a sum of
-            k Gumbel samples. Therefore it is is interesting to use for
-            structures that decompose into k parts.
-            This can also be any Callable that takes key and shape arguments.
+             Sum-of-Gamma, Gumbel and None. A sum of a k Sum-of-Gamma samples
+             approximates a single sample of Gumbel better than a sum of
+             k Gumbel samples. Therefore it is is interesting to use for
+             structures that decompose into k parts. Sum-of-Gramma is described
+             in (Niepert et al, 2021).
+             If noise is set to "None" it can produce deterministic
+             structures, e.g. Perturb-and-Marginals with "None" for noise is
+             equivalent to Structured-Attention from (Kim et al, 2017).
+             Noise argument can also be any Callable that takes key and shape
+             arguments.
       temperature: Temperature for perturbation. Lower temperature implies being
-                  closer to a peaked distribution.
+                   closer to a peaked distribution.
       sample_shape: Additional leading dimensions for sample in case multiple
                     samples are needed.
-      implicit_MLE_lr: Internal learning rate used for Implicit-MLE update.
-                       Niepert et al. refer to it as lambda parameter.
-      dp_smoothing: Method for smoothing max semiring in case
-                    perturb-and-smoothedDP is used as sampling method.
-      dp_temperature: Controls peakiness of the smooth
-                      approximation of the max operator.
-      sum_of_gamma_s: Approximation parameter for Sum-of-Gamma perturbation.
-                      Higher value implies better approximation for the cost
-                      of using more memory and computation.
+      straight_through: If the returned sample should be discretized by passing
+                        through the gradients using straight-through estimator.
+                        This influences Gumbel-CRF and Perturb-and-SoftmaxDP.
+      implicit_MLE_lr: Internal learning rate used for
+                       Perturb-and-MAP-Implicit-MLE update.
+                       Niepert et al. (2021) refer to it as lambda parameter.
     Returns:
       A sample of shape `sample_shape` + `batch_shape` + `event_shape`.
     References:
       Niepert et al, 2021: https://arxiv.org/pdf/2106.01798.pdf
       Paulus et al, 2021: https://arxiv.org/pdf/2006.08063.pdf
+      Fu et al, 2020: https://proceedings.neurips.cc/paper/2020/file/ea119a40c1592979f51819b0bd38d39d-Paper.pdf
       Corro and Titov, 2019: https://openreview.net/pdf?id=BJlgNh0qKQ
       Mensch and Blondel, 2018: https://arxiv.org/pdf/1802.03676.pdf
-    """
+      Kim et al, 2017: https://openreview.net/pdf?id=HkE0Nvqlg
+      Martins and Astudillo, 2016: http://proceedings.mlr.press/v48/martins16.pdf
+    """  # pylint: disable=line-too-long
     bcast = lambda x: jnp.broadcast_to(x, special.asshape(sample_shape)+x.shape)
     dist = jax.tree_map(bcast, self)
 
-    if noise == "Sum-of-Gamma":
-      noise_fn = partial(perturbation_utils.sample_sum_of_gamma,
-                         k=dist._typical_number_of_parts_per_event,
-                         s=sum_of_gamma_s)
-    elif noise == "Gumbel":
-      noise_fn = jax.random.gumbel
-    elif noise == "None":
-      noise_fn = lambda key, shape: jnp.zeros(shape)
-    elif isinstance(noise, Callable):
-      noise_fn = noise
-    else:
-      raise NotImplementedError
+    if method in ["Perturb-and-SoftmaxDP", "Perturb-and-SparsemaxDP",
+                  "Gumbel-CRF"] and not isinstance(self, SemiringDistribution):
+      raise ValueError(f"Method {method} can be applied only to distributions "
+                       "that use dynamic programming.")
 
-    if method == "stochastic-softmax-tricks":
-      eta = perturbation_utils.noise_for_pytree(key, noise_fn, dist)
-      noised_dist = special.tscale(1/temperature, special.tadd(dist, eta))
-      return noised_dist.marginals()
-    elif method == "perturb-and-smoothedDP":
-      if not isinstance(dist, SemiringDistribution):
-        raise ValueError(
-            "Perturb-and-SmoothedMAP only supports semiring distributions.")
-      eta = perturbation_utils.noise_for_pytree(key, noise_fn, dist)
-      noised_dist = special.tscale(1/temperature, special.tadd(dist, eta))
-      return noised_dist.argmax(smoothing=dp_smoothing,
-                                temperature=dp_temperature)
-    elif method == "implicit-MLE":
+    if method == "Perturb-and-Marginals":
+      return dist.with_perturbation(key, noise, temperature).marginals()
+    elif method == "Perturb-and-SoftmaxDP":
+      smoothing = "st-softmax" if straight_through else "softmax"
+      return dist.with_perturbation(key, noise, temperature
+                                    ).argmax(smoothing=smoothing)
+    elif method == "Perturb-and-SparsemaxDP":
+      return dist.with_perturbation(key, noise, temperature
+                                    ).argmax(smoothing="sparsemax")
+    elif method == "Gumbel-CRF":
+      relaxation = "ST-Gumbel-Softmax" if straight_through else "Gumbel-Softmax"
+      return self.sample(key, sample_shape=sample_shape,
+                         temperature=temperature, relaxation=relaxation)
+    elif method == "Perturb-and-MAP-Implicit-MLE":
+      # Check 1
       if not dist.struct_is_isomorphic_to_params:
         raise ValueError("Implicit MLE cannot be used with distributions that"
                          " not isomorphic to with their parameters.")
+      # Check 2
       if not hasattr(dist, "log_potentials") or dist.log_potentials is None:
-        raise ValueError("Implicit MLE requires distribution having "
-                         "log_potentials attribute.")
-      if implicit_MLE_lr is None:
-        raise ValueError("Implicit MLE requires specifying implicit_MLE_lr "
-                         "parameter. Probably this distribution is not "
-                         "supported.")
-      def argmax_fn(lp):
-        return dataclasses.replace(dist, log_potentials=lp).argmax()
+        raise ValueError(
+            "Implicit MLE requires distribution with log_potentials attribute.")
+      # Call Implicit-MLE
       sampling_fn = perturbation_utils.implicit_mle(
-          noise_fn=noise_fn, argmax_fn=argmax_fn,
+          noise_fn=dist._noise_fn(noise),
+          argmax_fn=lambda lp: replace(dist, log_potentials=lp).argmax(),
           internal_learning_rate=implicit_MLE_lr, temperature=temperature)
       return sampling_fn(key, dist.log_potentials)
     else:
@@ -408,18 +451,23 @@ class SemiringDistribution(Distribution):
     return jax.tree_map(jnp.nan_to_num, m)
 
   @typed
-  def _single_sample(self, key: Key, **kwargs) -> Event:
+  def _single_sample(
+      self, key: Key,
+      relaxation: Optional[Literal["Gumbel-Softmax", "ST-Gumbel-Softmax"]
+                           ] = None,
+      **kwargs) -> Event:
     """Finds a single sample per each batched distribution.
 
     Args:
       key: KeyArray to use for sampling. It is a single key that will be
            split for each batch element.
+      relaxation: Biased relaxation, if any.
       **kwargs: Any additional arguments needed for forward pass
     Returns:
       Single sample for each distribution in the batch.
     """
     keys = special.split_key_for_shape(key, self.batch_shape)
-    sr = semirings.SamplingSemiring()
+    sr = semirings.SamplingSemiring(relaxation=relaxation)
     def f(base_struct, dist, akey):
       return sr.unwrap(dist._structure_forward(base_struct, sr, akey, **kwargs))
     samples = grad_ndim(f, self.batch_ndim

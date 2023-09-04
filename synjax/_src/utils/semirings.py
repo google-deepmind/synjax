@@ -146,9 +146,9 @@ class MaxSemiring(Semiring):
       selection = jax.nn.softmax(a / self.temperature, axis=axis)
       return jnp.sum(selection * a, axis=axis)
     elif self.smoothing == "st-softmax":
-      selection = special.straight_trough_replace(
-          differentiable_input=jax.nn.softmax(a / self.temperature, axis=axis),
-          non_differentiable_output=special.max_one_hot(a, axis=axis))
+      selection = special.straight_through_replace(
+          jax.nn.softmax(a / self.temperature, axis=axis),
+          special.max_one_hot(a, axis=axis))
       return jnp.sum(selection * a, axis=axis)
     elif self.smoothing == "sparsemax":
       selection = special.sparsemax(a / self.temperature, axis=axis)
@@ -212,6 +212,11 @@ class KBestSemiring(Semiring):
 class SamplingSemiring(Semiring):
   """Implements the semiring whose gradients provide samples."""
 
+  def __init__(self, relaxation: Optional[Literal["Gumbel-Softmax",
+                                                  "ST-Gumbel-Softmax"]] = None):
+    super().__init__()
+    self.relaxation = relaxation
+
   def sum(self, a: Array, axis: Axis, *, key: Optional[KeyArray] = None
           ) -> Array:
     if key is None:
@@ -220,6 +225,8 @@ class SamplingSemiring(Semiring):
     def _sum_sampling(a, key):
       def grad(g):
         g = jnp.expand_dims(g, axis)
-        return special.sample_one_hot(a, axis=axis, key=key)*g, None
+        sampled = special.sample_one_hot(a, axis=axis, key=key,
+                                         relaxation=self.relaxation)
+        return sampled*g, None
       return jax.nn.logsumexp(a, axis), grad
     return _sum_sampling(a, key)

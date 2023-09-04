@@ -217,17 +217,20 @@ class DistributionTest(parameterized.TestCase):
       jax.block_until_ready(f(dist))
 
   def test_differentiable_sample(self, methods=(
-      "implicit-MLE", "stochastic-softmax-tricks", "perturb-and-smoothedDP")):
+      "Perturb-and-MAP-Implicit-MLE", "Perturb-and-Marginals",
+      "Perturb-and-SoftmaxDP", "Perturb-and-SparsemaxDP", "Gumbel-CRF")):
     key = jax.random.PRNGKey(0)
     summarize_fn = lambda x: jnp.sum(x * jax.random.normal(key, x.shape))
     count_non_zero = lambda x: jnp.count_nonzero(x) * eqx.is_inexact_array(x)
     for dist in self.create_random_batched_dists(key):
       for method in methods:
-        if method == "implicit-MLE" and not dist.struct_is_isomorphic_to_params:
+        if (method == "Perturb-and-MAP-Implicit-MLE"
+            and not dist.struct_is_isomorphic_to_params):
           continue
 
-        if (method == "perturb-and-smoothedDP" and
-            not isinstance(dist, SemiringDistribution)):
+        if (method in ["Perturb-and-SoftmaxDP", "Perturb-and-SparsemaxDP",
+                       "Gumbel-CRF"]
+            and not isinstance(dist, SemiringDistribution)):
           continue
 
         with self.subTest(f"{method}"):

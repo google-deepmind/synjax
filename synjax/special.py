@@ -14,13 +14,14 @@
 
 """Generally useful small functions."""
 
-from synjax._src.utils.special import inv
-from synjax._src.utils.special import safe_log
-from synjax._src.utils.special import safe_slogdet
+# pylint: disable=g-importing-member
+# pylint: disable=g-multiple-import
+from synjax._src.utils.special import inv, safe_slogdet, safe_log, sparsemax
 
 
 __all__ = [
     "safe_slogdet",
     "safe_log",
     "inv",
+    "sparsemax",
 ]
