@@ -22,7 +22,7 @@ from typing import Union, Callable, Literal
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Float, PyTree
+from jaxtyping import Array, ArrayLike, Float, PyTree
 from synjax._src.typing import Key, Shape, typed
 from synjax._src.utils.special import tadd, tsub, tscale_inexact_arrays
 
@@ -88,8 +88,8 @@ def noise_for_pytree(key: Key, noise_fn, tree: PyTree) -> PyTree:
 
 @typed
 def implicit_mle(*, noise_fn, argmax_fn: Callable[[PyTree], PyTree],
-                 internal_learning_rate: Float[Array, ""],
-                 temperature: Float[Array, ""]
+                 internal_learning_rate: Float[ArrayLike, ""],
+                 temperature: Float[ArrayLike, ""]
                  ) -> Callable[[Key, PyTree], PyTree]:
   """Implicit Maximum-Likelihood Estimation from Niepert et al.
 
