@@ -17,6 +17,7 @@
 Here we test only undirected cases since directed cases are tested in the
 spanning_tree_non_projective_crf_test and spanning_tree_projective_crf_test.
 """
+# pylint: disable=g-importing-member
 
 from absl.testing import absltest
 
@@ -25,6 +26,7 @@ import jax.numpy as jnp
 
 from synjax._src import distribution_test
 from synjax._src import spanning_tree_crf
+from synjax._src.deptree_algorithms.deptree_padding import undirected_tree_mask
 
 
 SpanningTreeCRF = spanning_tree_crf.SpanningTreeCRF
@@ -35,8 +37,9 @@ class SpanningTreeCrfTest(distribution_test.DistributionTest):
   def _create_dist(self, f):
     b, n = 2, 6
     return [spanning_tree_crf.SpanningTreeCRF(
-        log_potentials=f((b, n, n)), directed=False, single_root_edge=True,
-        projective=projective) for projective in [True, False]]
+        log_potentials=f((b, n, n)), lengths=jnp.array([n-1, n-2]),
+        directed=False, single_root_edge=True, projective=projective)
+            for projective in [True, False]]
 
   def create_random_batched_dists(self, key: jax.random.KeyArray):
     return self._create_dist(lambda shape: jax.random.uniform(key, shape))
@@ -71,6 +74,12 @@ class SpanningTreeCrfTest(distribution_test.DistributionTest):
   def assert_valid_marginals(self, dist, marginals):
     if not dist.directed:
       self.assert_is_symmetric(dist, marginals)
+    n = marginals.shape[-1]
+    self.assert_allclose(marginals * ~undirected_tree_mask(n, dist.lengths), 0)
+    row = jnp.arange(n) < dist.lengths[..., None, None]
+    col = jnp.arange(n)[:, None] < dist.lengths[..., None, None]
+    self.assert_allclose(jnp.where(row, 0, marginals), 0)
+    self.assert_allclose(jnp.where(col, 0, marginals), 0)
 
   def test_top_k(self):
     for dist in self.create_random_batched_dists(jax.random.PRNGKey(0)):

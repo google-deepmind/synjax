@@ -108,10 +108,12 @@ class TensorDecompositionPCFGTest(distribution_test.DistributionTest):
   def assert_valid_marginals(self, dist, marginals):
     chart_marginals, preterminal_marginals = marginals
     span_marginals = chart_marginals.sum(-1)
-    for i in range(dist.batch_shape[0]):
-      n = dist.lengths[i]
-      root_prob = span_marginals[i, 0, n-1]
-      self.assert_allclose(root_prob, 1)
+
+    lengths = jnp.broadcast_to(dist.lengths, span_marginals.shape[:-2])
+    root_probs = jnp.take_along_axis(span_marginals[..., 0, :],
+                                     lengths[..., None]-1, axis=-1)
+    self.assert_allclose(root_probs, 1)
+
     self.assert_zeros_and_ones(preterminal_marginals.sum(-1))
     self.assert_allclose(preterminal_marginals.sum((-1, -2)), dist.lengths)
 

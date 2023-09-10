@@ -34,7 +34,7 @@ def pad_log_potentials(log_potentials: Array, length: Array) -> Array:
   """
   max_nodes = log_potentials.shape[-1]
   padding_mask = _mask_for_padding(max_nodes, length)
-  potentials_mask = _mask_for_potentials(max_nodes, length)
+  potentials_mask = directed_tree_mask(max_nodes, length)
   # Set padded elems to 0.
   log_potentials = jnp.where(padding_mask, 0, log_potentials)
   # Ignore everything else except padding and selected potentials.
@@ -48,8 +48,12 @@ def _mask_for_padding(max_nodes: int, lengths: Array) -> Array:
   return vertical[..., None] & horizontal[..., None, :]
 
 
-def _mask_for_potentials(max_nodes: int, lengths: Array) -> Array:
+def directed_tree_mask(max_nodes: int, lengths: Array) -> Array:
+  return undirected_tree_mask(max_nodes, lengths).at[..., 0].set(False)
+
+
+def undirected_tree_mask(max_nodes: int, lengths: Array) -> Array:
   horizontal = jnp.arange(max_nodes) < lengths[..., None]
   vertical = jnp.arange(max_nodes) < lengths[..., None]
   matrix = vertical[..., None] & horizontal[..., None, :]
-  return matrix.at[..., 0].set(False) & ~jnp.eye(max_nodes, dtype=bool)
+  return matrix & ~jnp.eye(max_nodes, dtype=bool)  # Delete diagonal.

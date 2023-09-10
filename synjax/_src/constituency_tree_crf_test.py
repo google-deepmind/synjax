@@ -62,12 +62,12 @@ class TreeCrfTest(distribution_test.DistributionTest):
     self.assert_allclose(jnp.sum(samples, axis=(-1, -2, -3)), dist.lengths*2-1)
 
   def assert_valid_marginals(self, dist, marginals):
-    for i in range(dist.batch_shape[0]):
-      n = dist.lengths[i]
-      root_prob = marginals[i, 0, n-1, :].sum(-1)
-      self.assert_allclose(root_prob, 1)
-    terminals = jnp.diagonal(marginals.sum(-1), axis1=1, axis2=2)  # b, n
-    self.assert_all(jnp.isclose(terminals, 1) | jnp.isclose(terminals, 0))
+    lengths = jnp.broadcast_to(dist.lengths, marginals.shape[:-3])
+    root_probs = jnp.take_along_axis(marginals[..., 0, :, :].sum(-1),
+                                     lengths[..., None]-1, axis=-1)
+    self.assert_allclose(root_probs, 1)
+    terminals = jnp.diagonal(marginals.sum(-1), axis1=-1, axis2=-2)  # b, n
+    self.assert_zeros_and_ones(terminals)
     self.assert_allclose(terminals.sum(-1), dist.lengths)
 
 

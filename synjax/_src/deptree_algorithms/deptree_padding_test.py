@@ -44,8 +44,8 @@ class DepTreeUtilsTest(parameterized.TestCase):
               [0, 0, 0, 0, 0, 0]]])))
 
   def test_mask_for_potentials(self):
-    mask = deptree_padding._mask_for_potentials(max_nodes=6,
-                                                lengths=jnp.array([4]))
+    mask = deptree_padding.directed_tree_mask(max_nodes=6,
+                                              lengths=jnp.array([4]))
     self.assertTrue(jnp.allclose(
         mask.astype(jnp.int32),
         jnp.array(

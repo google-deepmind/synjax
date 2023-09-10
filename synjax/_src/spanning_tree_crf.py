@@ -15,6 +15,7 @@
 """Distribution of spanning trees."""
 # pylint: disable=g-multiple-import,g-importing-member
 from __future__ import annotations
+import dataclasses
 from typing import cast, Optional, Union, Tuple
 
 import equinox as eqx
@@ -105,14 +106,6 @@ class SpanningTreeCRF(Distribution):
     return self._dist.lengths
 
   @typed
-  def _remove_padding(self, event: Float[Array, "*xy n n"]
-                      ) -> Float[Array, "*xy n n"]:
-    """Removes padding elements introduced for computing log-partition."""
-    x = jnp.arange(event.shape[-1]) < self.lengths[..., None]
-    mask = x[..., None, :] & x[..., None]
-    return jnp.where(mask, event, 0)
-
-  @typed
   def sample_without_replacement(self, key: Key, k: int
                                  ) -> Tuple[Float[Array, "k *batch n n"],
                                             Float[Array, "k *batch"],
@@ -134,7 +127,6 @@ class SpanningTreeCRF(Distribution):
     samples, logprobs, gumbel_logprobs = dist.sample_without_replacement(key, k)
     if not self.directed:
       samples = samples + jnp.swapaxes(samples, -2, -1)
-    samples = self._remove_padding(samples)
     return samples, logprobs, gumbel_logprobs
 
   @typed
@@ -143,7 +135,6 @@ class SpanningTreeCRF(Distribution):
     samples = self._dist.sample(key=key, sample_shape=sample_shape, **kwargs)
     if not self.directed:
       samples = samples + jnp.swapaxes(samples, -2, -1)
-    samples = self._remove_padding(samples)
     return samples
 
   @typed
@@ -151,7 +142,6 @@ class SpanningTreeCRF(Distribution):
     samples = self._dist.differentiable_sample(**kwargs)
     if not self.directed:
       samples = samples + jnp.swapaxes(samples, -2, -1)
-    samples = self._remove_padding(samples)
     return samples
 
   @typed
@@ -162,7 +152,6 @@ class SpanningTreeCRF(Distribution):
   @typed
   def log_prob(self, event: Float[Array, "*b n n"], **kwargs
                ) -> Float[Array, "*b"]:
-    event = self._remove_padding(event)
     if not self.directed:
       event = jnp.triu(event)
     return self._dist.log_prob(event, **kwargs)
@@ -170,7 +159,6 @@ class SpanningTreeCRF(Distribution):
   @typed
   def unnormalized_log_prob(self, event: Float[Array, "*b n n"], **kwargs
                             ) -> Float[Array, "*b"]:
-    event = self._remove_padding(event)
     if not self.directed:
       event = jnp.triu(event)
     return self._dist.unnormalized_log_prob(event, **kwargs)
@@ -182,14 +170,13 @@ class SpanningTreeCRF(Distribution):
   @typed
   def marginals_for_template_variables(self, **kwargs
                                        ) -> Float[Array, "*batch n n"]:
-    return self._dist.marginals_for_template_variables(**kwargs)
+    return dataclasses.replace(self, log_potentials=self.marginals())
 
   @typed
   def marginals(self, **kwargs) -> Float[Array, "*batch n n"]:
     m = self._dist.marginals(**kwargs)
     if not self.directed:
       m = m + jnp.swapaxes(m, -2, -1)
-    m = self._remove_padding(m)
     return m
 
   @typed
@@ -197,7 +184,6 @@ class SpanningTreeCRF(Distribution):
     tree = self._dist.argmax(**kwargs)
     if not self.directed:
       tree = tree + jnp.swapaxes(tree, -2, -1)
-    tree = self._remove_padding(tree)
     return tree
 
   @typed
@@ -206,7 +192,6 @@ class SpanningTreeCRF(Distribution):
     tree, score = self._dist.argmax_and_max(**kwargs)
     if not self.directed:
       tree = tree + jnp.swapaxes(tree, -2, -1)
-    tree = self._remove_padding(tree)
     return tree, score
 
   @typed
@@ -215,7 +200,6 @@ class SpanningTreeCRF(Distribution):
     trees, scores = self._dist.top_k(k, **kwargs)
     if not self.directed:
       trees = trees + jnp.swapaxes(trees, -2, -1)
-    trees = self._remove_padding(trees)
     return trees, scores
 
   @typed

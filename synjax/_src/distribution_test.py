@@ -29,10 +29,18 @@ from synjax._src.distribution import Distribution, SemiringDistribution
 from synjax._src.utils.special import tsum_all
 
 
+def in_range(x, minimum: float, maximum: float):
+  leaves = jax.tree_util.tree_leaves(x)
+  return all(map(lambda y: jnp.all((minimum <= y) & (y <= maximum)), leaves))
+
+
 class DistributionTest(parameterized.TestCase):
 
+  def assert_between_zero_and_one(self, x, *, msg="", slack: float = 0.001):
+    self.assertTrue(in_range(x, 0.-slack, 1.+slack), msg=msg)
+
   def assert_zeros_and_ones(self, x):
-    leaves = jax.tree_util.tree_flatten(x)[0]
+    leaves = jax.tree_util.tree_leaves(x)
     is_close = lambda a, b: jnp.isclose(  # pylint: disable=g-long-lambda
         a, b, rtol=constants.TESTING_RELATIVE_TOLERANCE,
         atol=constants.TESTING_ABSOLUTE_TOLERANCE)
@@ -120,8 +128,8 @@ class DistributionTest(parameterized.TestCase):
     for dist in self.create_random_batched_dists(jax.random.PRNGKey(0)):
       assert dist.batch_shape
       m = dist.marginals()
-      self.assert_all(jax.tree_map(lambda x: (0 <= x) & (x <= 1.0001), m),
-                      msg="Marginals must be between 0 and 1")
+      self.assert_between_zero_and_one(
+          m, msg="Marginals must be between 0 and 1")
       self.assert_all(
           jax.tree_map(lambda x: jax.vmap(jnp.any)(0 < x), m),
           msg="Some marginals must be > 0")
@@ -137,7 +145,7 @@ class DistributionTest(parameterized.TestCase):
 
       probs = jnp.exp(dist.log_prob(best))
       self.assertEqual(probs.shape, dist.batch_shape)
-      self.assert_all((probs > 0) & (probs <= 1))
+      self.assert_between_zero_and_one(probs)
 
   def test_sampling(self):
     for dist in self.create_random_batched_dists(jax.random.PRNGKey(0)):
@@ -149,7 +157,7 @@ class DistributionTest(parameterized.TestCase):
       # pylint: disable=cell-var-from-loop
       self.assert_all(jax.tree_map(lambda x: x.shape[0] == k, samples))
       prob = jnp.exp(dist.log_prob(samples))
-      self.assert_all((0 < prob) & (prob <= 1))
+      self.assert_between_zero_and_one(prob)
 
   def test_entropy_cross_entropy(self):
     for dist, dist2 in zip(
@@ -222,24 +230,30 @@ class DistributionTest(parameterized.TestCase):
     key = jax.random.PRNGKey(0)
     summarize_fn = lambda x: jnp.sum(x * jax.random.normal(key, x.shape))
     count_non_zero = lambda x: jnp.count_nonzero(x) * eqx.is_inexact_array(x)
-    for dist in self.create_random_batched_dists(key):
-      for method in methods:
-        if (method == "Perturb-and-MAP-Implicit-MLE"
-            and not dist.struct_is_isomorphic_to_params):
-          continue
+    for method in methods:
+      def loss(x, key):
+        # pylint: disable=cell-var-from-loop
+        sample = x.differentiable_sample(
+            key=key, method=method, sample_shape=2, noise="Sum-of-Gamma",
+            temperature=jnp.float32(10), implicit_MLE_lr=jnp.float32(10))
+        return tsum_all(jax.tree_map(summarize_fn, sample)), sample
+      with self.subTest(f"{method}"):
+        for dist in self.create_random_batched_dists(key):
+          if (method == "Perturb-and-MAP-Implicit-MLE"
+              and not dist.struct_is_isomorphic_to_params):
+            continue
 
-        if (method in ["Perturb-and-SoftmaxDP", "Perturb-and-SparsemaxDP",
-                       "Gumbel-CRF"]
-            and not isinstance(dist, SemiringDistribution)):
-          continue
+          if (method in ["Perturb-and-SoftmaxDP", "Perturb-and-SparsemaxDP",
+                         "Gumbel-CRF"]
+              and not isinstance(dist, SemiringDistribution)):
+            continue
 
-        with self.subTest(f"{method}"):
-          def loss(x, key):
-            # pylint: disable=cell-var-from-loop
-            sample = x.differentiable_sample(
-                key=key, method=method, sample_shape=2, noise="Sum-of-Gamma",
-                temperature=jnp.float32(10), implicit_MLE_lr=jnp.float32(10))
-            return tsum_all(jax.tree_map(summarize_fn, sample))
-          g = eqx.filter_grad(loss)(dist, key)
+          # pylint: disable=too-many-function-args
+          g, sample = eqx.filter_grad(loss, has_aux=True)(dist, key)
+          # pylint: enable=too-many-function-args
           grad_vals = tsum_all(jax.tree_map(count_non_zero, g))
-          self.assertGreater(grad_vals, 0)
+          self.assertGreater(grad_vals, 1)
+          if method == "Perturb-and-MAP-Implicit-MLE":
+            self.assert_batch_of_valid_samples(dist, sample)
+          else:
+            self.assert_valid_marginals(dist, sample)

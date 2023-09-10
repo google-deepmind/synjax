@@ -14,6 +14,7 @@
 
 """Distribution representing projective dependency trees."""
 # pylint: disable=g-multiple-import, g-importing-member
+import dataclasses
 from typing import Literal, Optional, Tuple
 import warnings
 
@@ -23,7 +24,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float, Int32
 from synjax._src.config import get_config
 from synjax._src.constants import INF
-from synjax._src.deptree_algorithms import deptree_padding
+from synjax._src.deptree_algorithms.deptree_padding import pad_log_potentials, directed_tree_mask
 from synjax._src.distribution import SemiringDistribution
 from synjax._src.typing import Shape, Key, typed
 from synjax._src.utils import chart_struct
@@ -45,12 +46,11 @@ class SpanningTreeProjectiveCRF(SemiringDistribution):
                single_root_edge: bool,
                lengths: Optional[Int32[Array, "*batch"]] = None,
                **kwargs):
+    super().__init__(log_potentials=log_potentials, **kwargs)
     self.single_root_edge = single_root_edge
     if lengths is None:
       lengths = jnp.full(log_potentials.shape[:-2], log_potentials.shape[-1])
     self.lengths = lengths
-    super().__init__(log_potentials=deptree_padding.pad_log_potentials(
-        log_potentials, self.lengths), **kwargs)
 
   @property
   def event_shape(self) -> Shape:
@@ -59,6 +59,34 @@ class SpanningTreeProjectiveCRF(SemiringDistribution):
   @property
   def _typical_number_of_parts_per_event(self) -> Int32[Array, "*batch"]:
     return self.lengths-1
+
+  @property
+  def _padded_log_potentials(self) -> Float[Array, "*batch n n"]:
+    return pad_log_potentials(self.log_potentials, self.lengths)
+
+  def argmax_and_max(self, *args, **kwargs) -> Float[Array, "*batch n n"]:
+    # Default argmax_and_max with an addition of removing padding.
+    struct, score = super().argmax_and_max(*args, **kwargs)
+    return struct * directed_tree_mask(struct.shape[-1], self.lengths), score
+
+  def sample(self, *args, **kwargs):
+    # Default sample with an addition of removing padding.
+    struct = super().sample(*args, **kwargs)
+    return struct * directed_tree_mask(struct.shape[-1], self.lengths)
+
+  def marginals_for_template_variables(self, **kwargs):
+    # Default marginals_for_template_vars with an addition of removing padding.
+    marginal = super().marginals_for_template_variables(**kwargs).log_potentials
+    mask = directed_tree_mask(self.event_shape[-1], self.lengths)
+    return dataclasses.replace(self, log_potentials=mask * marginal)
+
+  def marginals(self, *args, **kwargs):
+    return self.marginals_for_template_variables(*args, **kwargs).log_potentials
+
+  def top_k(self, *args, **kwargs):
+    # Default top-k with an addition of removing padding.
+    struct, score = super().top_k(*args, **kwargs)
+    return struct * directed_tree_mask(struct.shape[-1], self.lengths), score
 
   @typed
   def _structure_forward(
@@ -107,16 +135,16 @@ class SpanningTreeProjectiveCRF(SemiringDistribution):
       Partition function with the provided semiring.
     """
     # See Figure 1b in Shi et al 2017 for good illustration of the algorithm.
-    n = self.log_potentials.shape[-1]-1  # Number of words excluding ROOT node.
+    n = self.event_shape[-1] - 1  # Number of words excluding ROOT node.
     if self.single_root_edge:
       # Apply Reweighting algorithm from Stanojević and Cohen 2021.
       # https://aclanthology.org/2021.emnlp-main.823.pdf
-      lp = jnp.clip(self.log_potentials, -INF/100)
+      lp = jnp.clip(self._padded_log_potentials, -INF/100)
       c = jax.lax.stop_gradient(n*(jnp.max(lp) - jnp.min(lp))+1)
     else:
       c = 0
 
-    params = base_struct+self.log_potentials.at[0].add(-c)
+    params = base_struct+self._padded_log_potentials.at[0].add(-c)
     params_extended = jnp.full((n+2, n+2), -INF).at[:n+1, :n+1].set(params)
     lr_arcs = chart_struct.from_cky_table(semiring.wrap(params_extended))
     rl_arcs = chart_struct.from_cky_table(semiring.wrap(params_extended.T))
@@ -154,7 +182,7 @@ class SpanningTreeProjectiveCRF(SemiringDistribution):
     Returns:
       Partition function with the provided semiring.
     """  # pylint: disable=line-too-long
-    params = base_struct+self.log_potentials
+    params = base_struct+self._padded_log_potentials
     lr_arcs = chart_struct.from_cky_table(semiring.wrap(params))
     rl_arcs = chart_struct.from_cky_table(semiring.wrap(params.T))
     chart_left_incomp = chart_struct.from_cky_table(

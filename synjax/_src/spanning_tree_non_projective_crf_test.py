@@ -14,6 +14,8 @@
 
 """Tests for spanning_tree_non_projective_crf."""
 
+# pylint: disable=g-importing-member
+
 from absl.testing import absltest
 from absl.testing import parameterized
 
@@ -25,6 +27,7 @@ from synjax._src import distribution_test
 from synjax._src import spanning_tree_non_projective_crf
 from synjax._src.deptree_algorithms import deptree_non_proj_argmax
 from synjax._src.deptree_algorithms import deptree_non_proj_wilson_sampling
+from synjax._src.deptree_algorithms.deptree_padding import directed_tree_mask
 
 SpanningTreeNonProjectiveCRF = (
     spanning_tree_non_projective_crf.SpanningTreeNonProjectiveCRF)
@@ -35,12 +38,12 @@ class SpanningTreeNonProjectiveCRFTest(
 
   def create_random_batched_dists(self, key: jax.random.KeyArray):
     b = 3
-    n_words = 5
-    log_potentials = jax.random.normal(key, (b, n_words+1, n_words+1))
+    n = 6
+    log_potentials = jax.random.normal(key, (b, n, n))
     dists = []
     for single_root_edge in [True, False]:
       dists.append(SpanningTreeNonProjectiveCRF(
-          log_potentials=log_potentials, lengths=None,
+          log_potentials=log_potentials, lengths=jnp.array([n-1, n-2, n]),
           single_root_edge=single_root_edge))
     return dists
 
@@ -92,24 +95,24 @@ class SpanningTreeNonProjectiveCRFTest(
         jax.block_until_ready(f(dist))
 
   def assert_batch_of_valid_samples(self, dist, samples):
-    trees = np.asarray(jnp.argmax(samples, -2).reshape(-1, samples.shape[-1]))
-    for tree in trees:
-      self.assertTrue(deptree_non_proj_argmax.is_tree(tree))
-    n_words = trees.shape[-1]-1
+    self.assert_zeros_and_ones(samples)
+    for tree in jnp.argmax(samples, -2).reshape(-1, samples.shape[-1]):
+      self.assertTrue(deptree_non_proj_argmax.is_tree(np.asarray(tree)))
     self.assert_allclose(jnp.diagonal(samples, axis1=-2, axis2=-1), 0)
     self.assert_allclose(samples[..., 0], 0)
     if dist.single_root_edge:
-      self.assert_allclose(jnp.count_nonzero(trees[..., 1:], axis=-1),
-                           n_words - 1)
+      self.assert_allclose(samples[..., 0, :].sum(-1), 1)
 
   def assert_valid_marginals(self, dist, marginals):
     self.assert_allclose(
         jnp.sum(jnp.sum(marginals, -2)[..., 1:], -1),
-        marginals.shape[-1]-1)
+        dist.lengths-1)
+    n = marginals.shape[-1]
+    self.assert_allclose(marginals * ~directed_tree_mask(n, dist.lengths), 0)
     self.assert_allclose(jnp.diagonal(marginals, axis1=-2, axis2=-1), 0)
     self.assert_allclose(marginals[..., 0], 0)
     if dist.single_root_edge:
-      self.assert_allclose(jnp.sum(marginals[:, 0, 1:], axis=-1), 1)
+      self.assert_allclose(jnp.sum(marginals[..., 0, 1:], axis=-1), 1)
 
   def test_top_k(self):
     """This method overrides the test of the superclass.

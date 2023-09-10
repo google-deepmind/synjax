@@ -142,19 +142,24 @@ class MaxSemiring(Semiring):
           ) -> Array:
     if self.smoothing is None:
       return jnp.max(a, axis=axis)
-    elif self.smoothing == "softmax":
-      selection = jax.nn.softmax(a / self.temperature, axis=axis)
-      return jnp.sum(selection * a, axis=axis)
-    elif self.smoothing == "st-softmax":
-      selection = special.straight_through_replace(
-          jax.nn.softmax(a / self.temperature, axis=axis),
-          special.max_one_hot(a, axis=axis))
-      return jnp.sum(selection * a, axis=axis)
-    elif self.smoothing == "sparsemax":
-      selection = special.sparsemax(a / self.temperature, axis=axis)
-      return jnp.sum(selection * a, axis=axis)
     else:
-      raise NotImplementedError
+      @jax.custom_gradient
+      def _sum(a):
+        if self.smoothing == "softmax":
+          selection = jax.nn.softmax(a / self.temperature, axis=axis)
+        elif self.smoothing == "st-softmax":
+          selection = special.straight_through_replace(
+              jax.nn.softmax(a / self.temperature, axis=axis),
+              special.max_one_hot(a, axis=axis))
+        elif self.smoothing == "sparsemax":
+          selection = special.sparsemax(a / self.temperature, axis=axis)
+        else:
+          raise NotImplementedError
+        def grad(g):
+          g = jnp.expand_dims(g, axis)
+          return selection*g,
+        return jnp.sum(selection * a, axis=axis), grad
+      return _sum(a)
 
   def add(self, a: Array, b: Array, *cs: Array, key: Optional[KeyArray] = None
           ) -> Array:

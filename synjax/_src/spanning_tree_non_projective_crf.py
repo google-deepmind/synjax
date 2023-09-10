@@ -16,6 +16,7 @@
 from __future__ import annotations
 # pylint: disable=g-long-lambda
 # pylint: disable=g-multiple-import, g-importing-member
+import dataclasses
 from functools import partial
 from typing import Literal, Optional, Tuple
 
@@ -25,7 +26,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float, Int32
 from synjax._src.config import get_config
 from synjax._src.constants import EPS, MTT_LOG_EPS
-from synjax._src.deptree_algorithms import deptree_padding
+from synjax._src.deptree_algorithms.deptree_padding import pad_log_potentials, directed_tree_mask
 from synjax._src.distribution import Distribution
 from synjax._src.typing import Shape, Key, typed
 from synjax._src.utils import autoregressive_decoding
@@ -99,15 +100,12 @@ class SpanningTreeNonProjectiveCRF(Distribution):
                single_root_edge: bool,
                lengths: Optional[Int32[Array, "*batch"]] = None,
                **kwargs):
+    super().__init__(log_potentials=log_potentials, **kwargs)
     self.single_root_edge = single_root_edge
     if lengths is None:
       batch_shape = log_potentials.shape[:-2]
       lengths = jnp.full(batch_shape, log_potentials.shape[-1])
     self.lengths = lengths
-    super().__init__(
-        log_potentials=deptree_padding.pad_log_potentials(log_potentials,
-                                                          self.lengths),
-        **kwargs)
 
   @property
   def event_shape(self) -> Shape:
@@ -124,7 +122,7 @@ class SpanningTreeNonProjectiveCRF(Distribution):
 
   @typed
   def argmax(self, **ignored_args) -> Float[Array, "*batch n n"]:
-    return mst_numpy_callback(self.log_potentials, self.lengths,
+    return mst_numpy_callback(self._padded_log_potentials, self.lengths,
                               self.single_root_edge).astype(jnp.float32)
 
   @typed
@@ -161,19 +159,29 @@ class SpanningTreeNonProjectiveCRF(Distribution):
               init_state=State.initial(lp,
                                        single_root_edge=self.single_root_edge),
               max_length=self.max_nodes-1,
-              k=k), self.batch_ndim)(self.log_potentials)
+              k=k), self.batch_ndim)(self._padded_log_potentials)
       trees = beam_state.sample
-      matrices = _to_adjacency_matrix(trees)
-      matrices = jnp.moveaxis(matrices, len(self.batch_shape), 0)
+      trees = jnp.moveaxis(trees, self.batch_ndim, 0)
+      matrices = _to_adjacency_matrix(trees, self.lengths)
       return matrices, self.unnormalized_log_prob(matrices)
+
+  @property
+  def _padded_log_potentials(self) -> Float[Array, "*batch n n"]:
+    return pad_log_potentials(self.log_potentials, self.lengths)
 
   @typed
   def log_partition(self) -> Float[Array, "*batch"]:
     log_potentials, correction = _optionally_shift_log_potentials(
-        self.log_potentials, self.single_root_edge)
+        self._padded_log_potentials, self.single_root_edge)
     laplacian_hat = _construct_laplacian_hat(log_potentials,
                                              self.single_root_edge)
     return correction + _custom_slog_det(laplacian_hat)[1]
+
+  def marginals_for_template_variables(self, **kwargs):
+    # Default marginals_for_template_vars with an addition of removing padding.
+    marginal = super().marginals_for_template_variables(**kwargs).log_potentials
+    mask = directed_tree_mask(self.event_shape[-1], self.lengths)
+    return dataclasses.replace(self, log_potentials=mask * marginal)
 
   @typed
   def sample_without_replacement(
@@ -199,11 +207,11 @@ class SpanningTreeNonProjectiveCRF(Distribution):
             max_length=self.max_nodes-1,
             k=k), self.batch_ndim
         )(special.split_key_for_shape(key, self.batch_shape),
-          self.log_potentials)
+          self._padded_log_potentials)
     sampled_trees = beam_state.sample
-    sampled_matrices = _to_adjacency_matrix(sampled_trees)
-    move = lambda x: jnp.moveaxis(x, len(self.batch_shape), 0)
-    return move(sampled_matrices), move(logprobs), move(gumbels)
+    move = lambda x: jnp.moveaxis(x, self.batch_ndim, 0)
+    sampled_matrices = _to_adjacency_matrix(move(sampled_trees), self.lengths)
+    return sampled_matrices, move(logprobs), move(gumbels)
 
   @typed
   def _single_sample(self, key: Key,
@@ -218,12 +226,12 @@ class SpanningTreeNonProjectiveCRF(Distribution):
               key=rng, max_length=self.max_nodes-1, unroll=1),
           self.batch_ndim
           )(special.split_key_for_shape(key, self.batch_shape),
-            self.log_potentials)
+            self._padded_log_potentials)
       sampled_trees = final_states.sample
-      sampled_matrices = _to_adjacency_matrix(sampled_trees)
+      sampled_matrices = _to_adjacency_matrix(sampled_trees, self.lengths)
     elif algorithm == "wilson":
       sampled_matrices = sample_wilson_numpy_callback(
-          self.log_potentials, self.lengths, self.single_root_edge
+          self._padded_log_potentials, self.lengths, self.single_root_edge
           ).astype(jnp.float32)
     else:
       raise NotImplementedError(
@@ -232,8 +240,10 @@ class SpanningTreeNonProjectiveCRF(Distribution):
 
 
 @typed
-def _to_adjacency_matrix(tree: Int32[Array, "*batch n"]
-                         ) -> Float[Array, "*batch n n"]:
+def _to_adjacency_matrix(
+    tree: Int32[Array, "*batch n"], lengths: Int32[Array, "*#batch"]
+    ) -> Float[Array, "*batch n n"]:
+  tree = jnp.where(jnp.arange(tree.shape[-1]) < lengths[..., None], tree, -1)
   return jax.nn.one_hot(tree, tree.shape[-1], dtype=jnp.float32, axis=-2
                         ).at[..., 0].set(0)
 
@@ -385,7 +395,7 @@ def sample_wilson_numpy_callback(
   trees = jax.pure_callback(f, result_shape, log_potentials, lengths,
                             single_root_edge, vectorized=True)
   # pytype: disable=bad-return-type
-  return (_to_adjacency_matrix(trees),
+  return (_to_adjacency_matrix(trees, lengths),
           lambda g: (jnp.zeros_like(log_potentials), None, None, None))
   # pytype: enable=bad-return-type
 
@@ -405,6 +415,6 @@ def mst_numpy_callback(log_potentials: jax.Array, lengths: jax.Array,
       lambda *x: deptree_non_proj_argmax.vectorized_mst(*x).astype(jnp.int32),
       result_shape, log_potentials, lengths, single_root_edge, vectorized=True)
   # pytype: disable=bad-return-type
-  return (_to_adjacency_matrix(trees),
+  return (_to_adjacency_matrix(trees, lengths),
           lambda g: (jnp.zeros_like(log_potentials), None, None))
   # pytype: enable=bad-return-type
