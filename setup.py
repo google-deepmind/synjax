@@ -38,7 +38,7 @@ _VERSION = _get_version()
 setup(
     name='synjax',
     version=_VERSION,
-    url='https://github.com/deepmind/synjax',
+    url='https://github.com/google-deepmind/synjax',
     license='Apache 2.0',
     author='DeepMind',
     description='SynJax: structured probability distributions for JAX.',
