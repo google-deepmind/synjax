@@ -76,8 +76,23 @@ InversionMethod = Literal["solve", "qr"]
 
 def inv(x: Array, *, inv_method: Optional[InversionMethod] = None,
         matmul_precision: Optional[jax.lax.Precision] = None,
-        test_invertability: bool = True):
-  """Matrix inverse with controlable precision, algorithm and invertability."""
+        test_invertability: bool = False):
+  """Matrix inverse with controlable precision and inversion algorithm.
+
+  The default behaviour of this function is the same as jnp.linalg.inv.
+  For the definitions of forward and reverse mode autodiff of matrix inverse
+  used in this implementation see Giles (2008) Section 2.2.3.
+  References:
+    Giles, 2008: https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf#page=4
+  Args:
+    x: Squared matrix (possibly batches) that needs to be inverted.
+    inv_method: Choise of the algorithm for computing matrix inverse.
+    matmul_precision: Precision of matrix multiplication in the backward pass.
+    test_invertability: Test if matrix is invertable before inverting it. If it
+                        is not invertable, return matrix of zeros.
+  Returns:
+    Matrix inverse.
+  """
   @jax.custom_jvp
   def inv_fn(x):
     if inv_method is None or inv_method == "solve":
@@ -98,6 +113,7 @@ def inv(x: Array, *, inv_method: Optional[InversionMethod] = None,
       return inverse
   @inv_fn.defjvp
   def inv_fn_jvp(primals, tangents):  # pylint: disable=unused-variable
+    # Giles (2008) Section 2.2.3 for forward mode autodiff of matrix inverse.
     x = inv_fn(primals[0])
     a = jnp.matmul(x, tangents[0], precision=matmul_precision)
     a = jnp.matmul(a, x, precision=matmul_precision)

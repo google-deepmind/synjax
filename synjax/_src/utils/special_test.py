@@ -85,26 +85,31 @@ class GeneralTest(parameterized.TestCase):
         # Allow lower precision closeness because of no gold standard.
         assert_allclose = partial(self.assert_allclose, rtol=1e-3, atol=1e-3)
 
+      assert_not_finite = lambda x: self.assertTrue(jnp.all(~jnp.isfinite(x)))
+
       with self.subTest(method):
         matrix = jax.random.uniform(jax.random.PRNGKey(0), (n, n))
         assert_allclose(special.inv(matrix, inv_method=method),
                         jnp.linalg.inv(matrix))
         assert_allclose(grad(special.inv, inv_method=method)(matrix),
                         grad(jnp.linalg.inv)(matrix))
-        matrix = jnp.zeros((n, n))
-        assert_allclose(special.inv(matrix, inv_method=method), 0.)
-        assert_allclose(grad(special.inv, inv_method=method)(matrix), 0.)
+
+        matrix = jnp.zeros((n, n))  # Non-invertable matrix.
+
+        assert_not_finite(special.inv(matrix, inv_method=method,
+                                      test_invertability=False))
         assert_allclose(special.inv(matrix, inv_method=method,
                                     test_invertability=True), 0.)
+
+        assert_not_finite(grad(special.inv, inv_method=method,
+                               test_invertability=False)(matrix))
         assert_allclose(grad(special.inv, inv_method=method,
                              test_invertability=True)(matrix), 0.)
+
         self.assert_all(~jnp.isfinite(special.inv(matrix, inv_method=method,
                                                   test_invertability=False)))
         self.assert_all(jnp.isnan(grad(special.inv, inv_method=method,
                                        test_invertability=False)(matrix)))
-        matrix = jnp.ones((n, n))
-        assert_allclose(special.inv(matrix, inv_method=method), 0.)
-        assert_allclose(grad(special.inv, inv_method=method)(matrix), 0.)
 
   def test_safe_slogdet(self):
     grad = lambda ff: jax.grad(lambda x: ff(x)[1])
