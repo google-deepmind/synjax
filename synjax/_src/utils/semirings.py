@@ -30,7 +30,6 @@ from synjax._src.utils import special
 
 
 Array = jax.Array
-KeyArray = jax.random.KeyArray
 Axis = Union[int, Sequence[int]]
 
 
@@ -95,15 +94,14 @@ class Semiring(metaclass=abc.ABCMeta):
   def mul(self, a: Array, b: Array, *cs: Array) -> Array:
     return functools.reduce(operator.add, [a, b, *cs])
 
-  def add(self, a: Array, b: Array, *cs: Array, key: Optional[KeyArray] = None
+  def add(self, a: Array, b: Array, *cs: Array, key: Optional[Array] = None
           ) -> Array:
     return self.sum(jnp.stack((a, b, *cs), axis=1), axis=1, key=key)
 
-  def sum(self, a: Array, axis: Axis, *, key: Optional[KeyArray] = None
-          ) -> Array:
+  def sum(self, a: Array, axis: Axis, *, key: Optional[Array] = None) -> Array:
     raise NotImplementedError
 
-  def einsum(self, subscripts: str, *operands, key: Optional[KeyArray] = None,
+  def einsum(self, subscripts: str, *operands, key: Optional[Array] = None,
              **kwargs) -> Array:
     fn = einsum_builder(self.sum, self.mul)
     return fn(subscripts, *operands, key=key, **kwargs)
@@ -115,11 +113,11 @@ class LogSemiring(Semiring):
   Gradients give marginals.
   """
 
-  def sum(self, a: Array, axis: Axis, *, key: Optional[KeyArray] = None
+  def sum(self, a: Array, axis: Axis, *, key: Optional[Array] = None
           ) -> Array:
     return jax.nn.logsumexp(a, axis=axis)
 
-  def add(self, a: Array, b: Array, *cs: Array, key: Optional[KeyArray] = None
+  def add(self, a: Array, b: Array, *cs: Array, key: Optional[Array] = None
           ) -> Array:
     return functools.reduce(jnp.logaddexp, [a, b, *cs])
 
@@ -138,30 +136,35 @@ class MaxSemiring(Semiring):
     self.smoothing = smoothing
     self.temperature = temperature
 
-  def sum(self, a: Array, axis: Axis, *, key: Optional[KeyArray] = None
-          ) -> Array:
-    if self.smoothing is None:
-      return jnp.max(a, axis=axis)
+  def _one_hot_selection(self, a: Array, axis: Axis) -> Array:
+    """Returns (possibly smoothed) one-hot sample along axis."""
+    if self.smoothing is None or self.smoothing == "max":
+      return special.max_one_hot(a, axis=axis)
+    elif self.smoothing == "softmax":
+      return jax.nn.softmax(a / self.temperature, axis=axis)
+    elif self.smoothing == "st-softmax":
+      return special.straight_through_replace(
+          jax.nn.softmax(a / self.temperature, axis=axis),
+          special.max_one_hot(a, axis=axis))
+    elif self.smoothing == "sparsemax":
+      return special.sparsemax(a / self.temperature, axis=axis)
     else:
-      @jax.custom_gradient
-      def _sum(a):
-        if self.smoothing == "softmax":
-          selection = jax.nn.softmax(a / self.temperature, axis=axis)
-        elif self.smoothing == "st-softmax":
-          selection = special.straight_through_replace(
-              jax.nn.softmax(a / self.temperature, axis=axis),
-              special.max_one_hot(a, axis=axis))
-        elif self.smoothing == "sparsemax":
-          selection = special.sparsemax(a / self.temperature, axis=axis)
-        else:
-          raise NotImplementedError
-        def grad(g):
-          g = jnp.expand_dims(g, axis)
-          return selection*g,
-        return jnp.sum(selection * a, axis=axis), grad
-      return _sum(a)
+      raise NotImplementedError
 
-  def add(self, a: Array, b: Array, *cs: Array, key: Optional[KeyArray] = None
+  def sum(self, a: Array, axis: Axis, *, key: Optional[Array] = None) -> Array:
+    @jax.custom_jvp
+    def _sum(a):
+      selection = self._one_hot_selection(a, axis)
+      return jnp.sum(selection * a, axis=axis)
+    @_sum.defjvp
+    def _sum_jvp(primals, tangents):
+      a, = primals
+      a_dot, = tangents
+      selection = self._one_hot_selection(a, axis)
+      return jnp.sum(selection * a, axis), jnp.sum(selection * a_dot, axis)
+    return _sum(a)
+
+  def add(self, a: Array, b: Array, *cs: Array, key: Optional[Array] = None
           ) -> Array:
     if self.smoothing:
       return super().add(a, b, *cs, key=key)
@@ -190,15 +193,14 @@ class KBestSemiring(Semiring):
       a = self.sum(a[:, None] + c[None], key=None, axis=1)
     return a
 
-  def sum(self, a: Array, axis: Axis, *, key: Optional[KeyArray] = None
-          ) -> Array:
+  def sum(self, a: Array, axis: Axis, *, key: Optional[Array] = None) -> Array:
     if self.k == 1:
       return MaxSemiring().sum(a, axis, key=key)
     else:
       fn = _wrap_fn_multi_axis_reduce(self._sum_single_axis)
       return fn(a, key=key, axis=axis)
 
-  def _sum_single_axis(self, a: Array, key: KeyArray, axis: int) -> Array:
+  def _sum_single_axis(self, a: Array, key: Array, axis: int) -> Array:
     """Computes sum within one axis only."""
     del key
     if self.approximate:
@@ -222,16 +224,16 @@ class SamplingSemiring(Semiring):
     super().__init__()
     self.relaxation = relaxation
 
-  def sum(self, a: Array, axis: Axis, *, key: Optional[KeyArray] = None
-          ) -> Array:
-    if key is None:
-      raise ValueError("KeyArray cannot be None.")
-    @jax.custom_gradient
-    def _sum_sampling(a, key):
-      def grad(g):
-        g = jnp.expand_dims(g, axis)
-        sampled = special.sample_one_hot(a, axis=axis, key=key,
+  def sum(self, a: Array, axis: Axis, *, key: Optional[Array] = None) -> Array:
+    @jax.custom_jvp
+    def _sum(a, key):
+      del key
+      return jax.nn.logsumexp(a, axis=axis)
+    @_sum.defjvp
+    def _sum_jvp(primals, tangents):
+      a, key = primals
+      a_dot, _ = tangents
+      selection = special.sample_one_hot(a, axis=axis, key=key,
                                          relaxation=self.relaxation)
-        return sampled*g, None
-      return jax.nn.logsumexp(a, axis), grad
-    return _sum_sampling(a, key)
+      return jax.nn.logsumexp(a, axis=axis), jnp.sum(selection*a_dot, axis=axis)
+    return _sum(a, key)

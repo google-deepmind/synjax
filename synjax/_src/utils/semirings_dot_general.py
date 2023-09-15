@@ -50,7 +50,7 @@ def build_dot_general(sum_fn, mul_op):
     sum_fn = add_unused_key_arg(sum_fn)
 
   def matmul(lhs: jax.Array, rhs: jax.Array,
-             key: Optional[jax.random.KeyArray] = None) -> jax.Array:
+             key: Optional[jax.Array] = None) -> jax.Array:
     return sum_fn(mul_op(lhs[..., None], rhs[..., None, :, :]),
                   axis=-2, key=key)
   return dot_general_from_matmul(matmul)
@@ -68,7 +68,7 @@ def dot_general_from_matmul(matmul):
   def dot_general(lhs: jax.Array, rhs: jax.Array,
                   dimension_numbers: DotDimensionNumbers, precision=None,
                   preferred_element_type=None,
-                  key: Optional[jax.random.KeyArray] = None) -> jax.Array:
+                  key: Optional[jax.Array] = None) -> jax.Array:
     # This function will reorder axes of lhs and rhs so that they are
     # (*batch_dims, *lhs_other_dims, *contracting_dims) for lhs and
     # (*batch_dims, *contracting_dims, *rhs_other_dims) for rhs and

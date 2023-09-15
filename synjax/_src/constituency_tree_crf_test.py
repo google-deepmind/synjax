@@ -32,7 +32,7 @@ def is_symmetric(x, axis1, axis2):
 
 class TreeCrfTest(distribution_test.DistributionTest):
 
-  def create_random_batched_dists(self, key: jax.random.KeyArray):
+  def create_random_batched_dists(self, key: jax.Array):
     b, n, t = 3, 5, 2
     log_potentials = jnp.log(jax.random.uniform(key, (b, n, n, t)))
     lengths = jnp.array(list(range(n-b+1, n+1)))

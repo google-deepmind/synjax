@@ -35,7 +35,7 @@ SpanningTreeProjectiveCRF = (
 
 class SpanningTreeProjectiveCRFTest(distribution_test.DistributionTest):
 
-  def create_random_batched_dists(self, key: jax.random.KeyArray):
+  def create_random_batched_dists(self, key: jax.Array):
     b = 3
     n = 6
     log_potentials = jax.random.normal(key, (b, n, n))

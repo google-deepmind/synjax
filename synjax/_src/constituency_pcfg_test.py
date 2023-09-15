@@ -45,7 +45,7 @@ class PcfgTest(distribution_test.DistributionTest):
     word_ids = jnp.tile(jnp.arange(n), (b, 1))
     return [PCFG(**log_potentials, word_ids=word_ids)]
 
-  def create_random_batched_dists(self, key: jax.random.KeyArray):
+  def create_random_batched_dists(self, key: jax.Array):
     return self._create_dist(
         lambda shape: jnp.log(jax.random.uniform(key, shape)))
 

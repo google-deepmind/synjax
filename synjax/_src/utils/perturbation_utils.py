@@ -86,11 +86,11 @@ def noise_for_pytree(key: Key, noise_fn, tree: PyTree) -> PyTree:
   return jax.tree_util.tree_unflatten(tree_def, new_leaves)
 
 
-@typed
-def implicit_mle(*, noise_fn, argmax_fn: Callable[[PyTree], PyTree],
+def implicit_mle(*, noise_fn: Callable[..., PyTree],
+                 argmax_fn: Callable[..., PyTree],
                  internal_learning_rate: Float[ArrayLike, ""],
                  temperature: Float[ArrayLike, ""]
-                 ) -> Callable[[Key, PyTree], PyTree]:
+                 ) -> Callable[..., PyTree]:
   """Implicit Maximum-Likelihood Estimation from Niepert et al.
 
   Implicit MLE allows for flow of gradient trough discrete structure sampled by
@@ -109,16 +109,18 @@ def implicit_mle(*, noise_fn, argmax_fn: Callable[[PyTree], PyTree],
     Niepert et al, 2021: https://arxiv.org/pdf/2106.01798.pdf#page=4
   """
   @jax.custom_vjp
-  def sampling(key: Key, theta: PyTree) -> PyTree:
-    return argmax_fn(tadd(theta, noise_for_pytree(key, noise_fn, theta)))
-  def sampling_forward(key: Key, theta: PyTree) -> PyTree:
+  def sampling(key: Key, theta: PyTree, *args) -> PyTree:
+    return argmax_fn(tadd(theta, noise_for_pytree(key, noise_fn, theta)), *args)
+  def sampling_forward(key: Key, theta: PyTree, *args) -> PyTree:
     eta = tscale_inexact_arrays(temperature,
                                 noise_for_pytree(key, noise_fn, theta))
-    z_hat = argmax_fn(tadd(theta, eta))
-    return z_hat, (eta, theta, z_hat)
+    z_hat = argmax_fn(tadd(theta, eta), *args)
+    return z_hat, (eta, theta, z_hat, args)
   def sampling_backward(residuals, g) -> PyTree:
-    eta, theta, z_hat = residuals
+    eta, theta, z_hat, args = residuals
     theta_hat = tsub(theta, tscale_inexact_arrays(internal_learning_rate, g))
-    return None, tsub(z_hat, argmax_fn(tadd(theta_hat, eta)))
+    return (None,
+            tsub(z_hat, argmax_fn(tadd(theta_hat, eta), *args)),
+            *[None for _ in args])
   sampling.defvjp(sampling_forward, sampling_backward)
   return sampling

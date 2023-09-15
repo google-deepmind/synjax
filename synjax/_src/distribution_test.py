@@ -80,8 +80,7 @@ class DistributionTest(parameterized.TestCase):
       np.testing.assert_allclose(a, b, rtol=rtol, atol=atol, err_msg=msg)
     jax.tree_map(array_all_close, x, y)
 
-  def create_random_batched_dists(self, key: jax.random.KeyArray
-                                  ) -> List[Distribution]:
+  def create_random_batched_dists(self, key: jax.Array) -> List[Distribution]:
     raise NotImplementedError
 
   def create_symmetric_batched_dists(self) -> List[Distribution]:

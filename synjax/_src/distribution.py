@@ -87,7 +87,7 @@ class Distribution(eqx.Module):
     """Unbiased sampling of a structure.
 
     Args:
-      key: KeyArray key.
+      key: Key array.
       sample_shape: Additional leading dimensions for sample.
       temperature: Sampling temperature.
       **kwargs: Additional distribution specific kwargs.
@@ -236,9 +236,9 @@ class Distribution(eqx.Module):
       # Call Implicit-MLE
       sampling_fn = perturbation_utils.implicit_mle(
           noise_fn=dist._noise_fn(noise),
-          argmax_fn=lambda lp: replace(dist, log_potentials=lp).argmax(),
+          argmax_fn=lambda lp, dst: replace(dst, log_potentials=lp).argmax(),
           internal_learning_rate=implicit_MLE_lr, temperature=temperature)
-      return sampling_fn(key, dist.log_potentials)
+      return sampling_fn(key, dist.log_potentials, dist)
     else:
       raise NotImplementedError
 
@@ -459,7 +459,7 @@ class SemiringDistribution(Distribution):
     """Finds a single sample per each batched distribution.
 
     Args:
-      key: KeyArray to use for sampling. It is a single key that will be
+      key: Key array to use for sampling. It is a single key that will be
            split for each batch element.
       relaxation: Biased relaxation, if any.
       **kwargs: Any additional arguments needed for forward pass

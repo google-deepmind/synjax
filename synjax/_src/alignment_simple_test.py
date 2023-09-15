@@ -54,7 +54,7 @@ class AlignmentCrfTest(distribution_test.DistributionTest):
       self.assertEqual(struct_potential.shape, dist.batch_shape)
       self.assert_all(struct_potential > 0)
 
-  def create_random_batched_dists(self, key: jax.random.KeyArray):
+  def create_random_batched_dists(self, key: jax.Array):
     b, n, m = 3, 5, 6
     log_potentials = jax.random.normal(key, (b, n, m))
     return [AlignmentCRF(log_potentials, alignment_type=ttype)

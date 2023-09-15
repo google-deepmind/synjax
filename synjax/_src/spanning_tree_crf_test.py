@@ -41,7 +41,7 @@ class SpanningTreeCrfTest(distribution_test.DistributionTest):
         directed=False, single_root_edge=True, projective=projective)
             for projective in [True, False]]
 
-  def create_random_batched_dists(self, key: jax.random.KeyArray):
+  def create_random_batched_dists(self, key: jax.Array):
     return self._create_dist(lambda shape: jax.random.uniform(key, shape))
 
   def create_symmetric_batched_dists(self):

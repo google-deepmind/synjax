@@ -35,7 +35,7 @@ class GeneralMonotoneAlignmentCrfTest(distribution_test.DistributionTest):
     else:
       raise NotImplementedError
 
-  def create_random_batched_dists(self, key: jax.random.KeyArray):
+  def create_random_batched_dists(self, key: jax.Array):
     b, m, n = 3, 5, 6
     step_0 = step_1 = jax.random.normal(key, (b, m, n))
     dists = [GeneralMonotoneAlignmentCRF((step_0, step_1), step_0),

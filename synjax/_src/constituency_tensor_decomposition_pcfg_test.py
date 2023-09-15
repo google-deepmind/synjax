@@ -67,7 +67,7 @@ class TensorDecompositionPCFGTest(distribution_test.DistributionTest):
     return (special.log_catalan(dist.lengths-1) + log_rank_combs
             + log_nt_combs + log_pt_combs)
 
-  def create_random_batched_dists(self, key: jax.random.KeyArray):
+  def create_random_batched_dists(self, key: jax.Array):
     f = jax.random.uniform
     keys = jax.random.split(key, 6)
     b, n, voc, nt, pt, r = 2, 6, 10, 2, 3, 2

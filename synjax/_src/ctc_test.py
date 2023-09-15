@@ -25,7 +25,7 @@ from synjax._src import distribution_test
 
 class CtcTest(distribution_test.DistributionTest):
 
-  def create_random_batched_dists(self, key: jax.random.KeyArray):
+  def create_random_batched_dists(self, key: jax.Array):
     b, n, v, l = 2, 12, 400, 6
     key1, key2 = jax.random.split(key, 2)
     log_potentials = jax.random.uniform(key1, (b, n, v))

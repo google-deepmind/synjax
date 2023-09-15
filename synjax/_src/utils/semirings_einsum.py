@@ -57,7 +57,7 @@ def _removechars(s, chars):
 # Taken and modified from jax._src.numpy.lax_numpy
 def _einsum(operands: List[jnp.ndarray],
             contractions: Sequence[Tuple[Tuple[int, ...], FrozenSet[str], str]],
-            precision, sum_fn, mul_op, dot_general, key: jax.random.KeyArray):
+            precision, sum_fn, mul_op, dot_general, key: jax.Array):
   """This function executes tensor contraction operations.
 
   It is taken from jax._src.numpy.lax_numpy and modified so that it allows for
@@ -77,7 +77,7 @@ def _einsum(operands: List[jnp.ndarray],
                  dot_general will be constructed automatically, but it won't be
                  optimized for operations that can use cores dedicated for
                  matmul.
-    key: Is a jax.random.KeyArray that is split into sub-keys that are passed to
+    key: Is a jax.Array that is split into sub-keys that are passed to
          sum_fn each time it is called. This is useful for semi-rings that
          require randomness.
   Returns:
@@ -104,7 +104,7 @@ def _einsum(operands: List[jnp.ndarray],
     return operand, names
 
   def sum_repeats(operand, names, counts, keep_names, *,
-                  key: jax.random.KeyArray):
+                  key: jax.Array):
     for name, count in counts.items():
       if count > 1:
         axes = [i for i, n in enumerate(names) if n == name]
@@ -241,7 +241,7 @@ def _einsum(operands: List[jnp.ndarray],
 # Taken and modified from jax._src.numpy.lax_numpy
 def einsum_generalized(*operands, optimize="optimal", precision=None,
                        sum_fn, mul_op, dot_general,
-                       key: Optional[jax.random.KeyArray] = None):
+                       key: Optional[jax.Array] = None):
   """Generalized version of einsum that works with arbitrary sum and mul ops.
 
   It is taken from jax._src.numpy.lax_numpy and modified minimally so that it
@@ -261,7 +261,7 @@ def einsum_generalized(*operands, optimize="optimal", precision=None,
                  dot_general will be constructed automatically, but it won't be
                  optimized for operations that can use cores dedicated for
                  matmul.
-    key: Is a jax.random.KeyArray that is split into sub-keys that are passed to
+    key: Is a jax.Array that is split into sub-keys that are passed to
          sum_fn each time it is called. This is useful for semi-rings that
          require randomness.
   Returns:

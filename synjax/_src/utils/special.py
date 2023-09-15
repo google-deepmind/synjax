@@ -27,7 +27,6 @@ from synjax._src import constants
 
 Array = jax.Array
 Shape = Tuple[int, ...]
-KeyArray = jax.random.KeyArray
 EPS = constants.EPS
 INF = constants.INF
 
@@ -127,18 +126,20 @@ def safe_slogdet(
     matmul_precision: Optional[Union[str, jax.lax.Precision]] = None,
     test_invertability: bool = True):
   """Signed log determinant with more stable gradients."""
-  @jax.custom_vjp
+  @jax.custom_jvp
   def slogdet_fn(y):
     sign, log_abs_det = jnp.linalg.slogdet(y, method=logdet_method)
     return sign, jnp.clip(jnp.nan_to_num(log_abs_det, neginf=-INF, posinf=INF),
                           -INF, INF)
-  def slogdet_fn_fwd(y: Array) -> Tuple[Tuple[Array, Array], Array]:
-    return slogdet_fn(y), y
-  def slogdet_fn_bwd(y: Array, g) -> Tuple[Array]:
+  @slogdet_fn.defjvp
+  def slogdet_fn_jvp(primals, tangents):  # pylint: disable=unused-variable
+    y, = primals
+    primals_out = slogdet_fn(y)
     inverse = inv(y, inv_method=inv_method, matmul_precision=matmul_precision,
                   test_invertability=test_invertability)
-    return (jnp.einsum("...,...ij->...ji", g[1], inverse),)
-  slogdet_fn.defvjp(slogdet_fn_fwd, slogdet_fn_bwd)
+    tangents_out = (jnp.zeros_like(primals_out[0]),
+                    jnp.einsum("...ji,...ij->...", tangents[0], inverse))
+    return primals_out, tangents_out
   return slogdet_fn(x)
 
 
@@ -184,12 +185,10 @@ def _tpu_take(x: Array, indices: Array, axis: int = -1) -> Array:
 
 
 def max_one_hot(x: Array, axis: Union[int, Tuple[int, ...]]) -> Array:
-  max_val = jnp.max(x, axis=axis, keepdims=True)
-  zero = x-jax.lax.stop_gradient(x)
-  return jnp.where(x == max_val, zero+1., 0.)
+  return (x == x.max(axis=axis, keepdims=True)).astype(jnp.float32)
 
 
-def sample_one_hot(logits: Array, *, key: KeyArray,
+def sample_one_hot(logits: Array, *, key: Array,
                    axis: Union[int, Tuple[int, ...]] = -1,
                    relaxation: Optional[Literal["Gumbel-Softmax",
                                                 "ST-Gumbel-Softmax"]]) -> Array:
@@ -216,7 +215,7 @@ def sample_one_hot(logits: Array, *, key: KeyArray,
 ############################################################################
 
 
-def split_key_for_shape(key: KeyArray, shape):
+def split_key_for_shape(key: Array, shape):
   shape = asshape(shape)
   keys = jax.random.split(key, shape_size(shape))
   return keys.reshape(shape+key.shape)
