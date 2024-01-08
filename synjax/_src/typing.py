@@ -20,4 +20,4 @@ import typeguard
 
 Shape = Tuple[int, ...]
 Key = jaxtyping.PRNGKeyArray
-typed = lambda fn: jaxtyping.jaxtyped(typeguard.typechecked(fn))
+typed = lambda fn: jaxtyping.jaxtyped(fn, typechecker=typeguard.typechecked)
