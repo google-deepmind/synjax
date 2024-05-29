@@ -79,11 +79,11 @@ class Semiring(metaclass=abc.ABCMeta):
     Returns:
       Log-potentials adapted to a particular semiring.
     """
-    return jax.tree_map(lambda x: x[None], log_potentials)
+    return jax.tree.map(lambda x: x[None], log_potentials)
 
   def unwrap(self, wrapped):
     """Reverses the effect of Semiring.wrap()."""
-    return jax.tree_map(lambda x: x.squeeze(0), wrapped)
+    return jax.tree.map(lambda x: x.squeeze(0), wrapped)
 
   def one(self, shape=()) -> Array:
     return self.wrap(jnp.zeros(shape))

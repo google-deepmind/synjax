@@ -50,13 +50,6 @@ class SpanningTreeProjectiveCRFTest(distribution_test.DistributionTest):
         log_potentials=jnp.zeros((3, 6, 5)), lengths=None,
         single_root_edge=True)
 
-  def test_Eisner_and_Kuhlmann_argmax_agree(self):
-    for dist in self.create_random_batched_dists(jax.random.PRNGKey(0)):
-      kuhlmann_argmax, kuhlmann_max = dist.argmax_and_max(algorithm="Kuhlmann")
-      eisner_argmax, eisner_max = dist.argmax_and_max(algorithm="Eisner")
-      self.assert_allclose(kuhlmann_argmax, eisner_argmax)
-      self.assert_allclose(kuhlmann_max, eisner_max)
-
   def create_symmetric_batched_dists(self):
     b = 3
     n_words = 5

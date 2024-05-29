@@ -81,9 +81,8 @@ def beam_search(init_state: State, max_length: int, k: int,
   a = jax.eval_shape(init_state.logprobs).shape[-1]
   sbs = _GeneralStochasticBeamSearch(k=k, a=a, is_regular_beam_search=True,
                                      unroll=unroll)
-  beam_state, logprobs, _ = sbs.sample(key=None,  # pytype: disable=wrong-arg-types
-                                       init_state=init_state,
-                                       max_length=max_length)
+  beam_state, logprobs, _ = sbs.sample(  # pytype: disable=wrong-arg-types
+      key=None, init_state=init_state, max_length=max_length)
   return beam_state, logprobs
 
 

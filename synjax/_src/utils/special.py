@@ -238,7 +238,7 @@ def vmap_ndim(f, ndim: int, in_axes: Union[int, None, Sequence[Any]] = 0):
 def grad_ndim(f, ndim: int, has_aux: bool = False):
   gf = eqx.filter_grad(f, has_aux=has_aux)
   gf = vmap_ndim(gf, ndim)
-  return lambda *inputs: jax.tree_map(jnp.nan_to_num, gf(*inputs))
+  return lambda *inputs: jax.tree.map(jnp.nan_to_num, gf(*inputs))
 
 is_shape = lambda x: isinstance(x, tuple) and all(isinstance(y, int) for y in x)
 
@@ -246,10 +246,10 @@ is_shape = lambda x: isinstance(x, tuple) and all(isinstance(y, int) for y in x)
 ####  PyTree utils.
 ############################################################################
 
-tadd = functools.partial(jax.tree_map, jnp.add)
-tsub = functools.partial(jax.tree_map, jnp.subtract)
-tlog = functools.partial(jax.tree_map, safe_log)
-tmul = functools.partial(jax.tree_map, jnp.multiply)
+tadd = functools.partial(jax.tree.map, jnp.add)
+tsub = functools.partial(jax.tree.map, jnp.subtract)
+tlog = functools.partial(jax.tree.map, safe_log)
+tmul = functools.partial(jax.tree.map, jnp.multiply)
 tsum_all = lambda x: functools.reduce(jnp.add, map(jnp.sum, jtu.tree_leaves(x)))
 
 
@@ -257,7 +257,7 @@ def tscale_inexact_arrays(scalar: Union[float, Array], tree):
   if isinstance(scalar, float) and scalar == 1.:
     return tree
   else:
-    return jax.tree_map(lambda x: scalar * x if eqx.is_inexact_array(x) else x,
+    return jax.tree.map(lambda x: scalar * x if eqx.is_inexact_array(x) else x,
                         tree)
 
 
@@ -268,7 +268,7 @@ def tscale_inexact_arrays(scalar: Union[float, Array], tree):
 
 def straight_through_replace(differentiable_input, non_differentiable_output):
   """Replaces value and passes trough the gradient."""
-  if jax.tree_map(lambda x: x.shape, differentiable_input) != jax.tree_map(
+  if jax.tree.map(lambda x: x.shape, differentiable_input) != jax.tree.map(
       lambda x: x.shape, non_differentiable_output):
     raise ValueError("Shapes for straight-through replacement don't match.")
   return tadd(jax.lax.stop_gradient(tsub(non_differentiable_output,

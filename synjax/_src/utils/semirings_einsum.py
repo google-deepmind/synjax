@@ -123,8 +123,7 @@ def _einsum(operands: List[jnp.ndarray],
     new_names = []
     for i, d in enumerate(names):
       other_i = other_names.find(d)
-      if not core.symbolic_equal_dim(s[i], 1) or other_i == -1 or (
-          core.symbolic_equal_dim(other_shape[other_i], 1)):
+      if s[i] != 1 or other_i == -1 or other_shape[other_i] == 1:
         new_shape.append(s[i])
         new_names.append(d)
     return jnp.reshape(operand, tuple(new_shape)), "".join(new_names)

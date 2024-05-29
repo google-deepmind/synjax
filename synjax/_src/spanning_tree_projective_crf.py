@@ -15,20 +15,18 @@
 """Distribution representing projective dependency trees."""
 # pylint: disable=g-multiple-import, g-importing-member
 import dataclasses
-from typing import Literal, Optional, Tuple
-import warnings
+from typing import Optional, Tuple
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int32
 from synjax._src.config import get_config
-from synjax._src.constants import INF
 from synjax._src.deptree_algorithms.deptree_padding import pad_log_potentials, directed_tree_mask
 from synjax._src.distribution import SemiringDistribution
 from synjax._src.typing import Shape, Key, typed
 from synjax._src.utils import chart_struct
-from synjax._src.utils.semirings import Semiring, MaxSemiring
+from synjax._src.utils.semirings import Semiring
 
 
 Chart = chart_struct.Chart
@@ -90,83 +88,6 @@ class SpanningTreeProjectiveCRF(SemiringDistribution):
 
   @typed
   def _structure_forward(
-      self, base_struct: Float[Array, "n n"], semiring: Semiring, key: Key,
-      algorithm: Optional[Literal["Kuhlmann", "Eisner"]] = None
-      ) -> Float[Array, "s"]:
-    if algorithm is None:
-      if isinstance(semiring, MaxSemiring):
-        algorithm = get_config().projective_argmax_algorithm
-      else:
-        algorithm = "Eisner"
-
-    if algorithm == "Kuhlmann" and not isinstance(semiring, MaxSemiring):
-      warnings.warn(
-          "Kuhlmann's arc-hybrid algorithm does not provide correct results"
-          " for any semiring except MaxSemiring due to spurious ambiguity.")
-
-    if algorithm == "Eisner":
-      return self._structure_forward_Eisner(base_struct, semiring, key)
-    elif algorithm == "Kuhlmann":
-      return self._structure_forward_Kuhlmann_arc_hybrid(
-          base_struct, semiring, key)
-    else:
-      raise ValueError(f"Unknown algorithm {algorithm}.")
-
-  @typed
-  def _structure_forward_Kuhlmann_arc_hybrid(  # pylint: disable=invalid-name
-      self, base_struct: Float[Array, "n n"], semiring: Semiring, key: Key
-      ) -> Float[Array, "s"]:
-    """Kuhlmann et al (2011) arc-hybrid parsing algorithm.
-
-    Fast in practice, but should be used only with MaxSemiring because it has
-    multiiple derivations for the same tree causing the partition function
-    computation of other semirings to be incorrect. Simple visual depiction of
-    the algorithm is present in Shi et al (2017).
-
-    References:
-      Shi et al, 2017 - Figure 1b: https://aclanthology.org/D17-1002.pdf#page=5
-      Kuhlmann et al, 2011: https://aclanthology.org/P11-1068.pdf
-    Args:
-      base_struct: Zero tensor for tracking gradients by being glued to the
-                   structure of the computation.
-      semiring: Used semiring.
-      key: Random key.
-    Returns:
-      Partition function with the provided semiring.
-    """
-    # See Figure 1b in Shi et al 2017 for good illustration of the algorithm.
-    n = self.event_shape[-1] - 1  # Number of words excluding ROOT node.
-    if self.single_root_edge:
-      # Apply Reweighting algorithm from Stanojević and Cohen 2021.
-      # https://aclanthology.org/2021.emnlp-main.823.pdf
-      lp = jnp.clip(self._padded_log_potentials, -INF/100)
-      c = jax.lax.stop_gradient(n*(jnp.max(lp) - jnp.min(lp))+1)
-    else:
-      c = 0
-
-    params = base_struct+self._padded_log_potentials.at[0].add(-c)
-    params_extended = jnp.full((n+2, n+2), -INF).at[:n+1, :n+1].set(params)
-    lr_arcs = chart_struct.from_cky_table(semiring.wrap(params_extended))
-    rl_arcs = chart_struct.from_cky_table(semiring.wrap(params_extended.T))
-    init_chart = chart_struct.from_cky_table(semiring.wrap(
-        INF*(jnp.eye(n+2, k=1)-1)))
-    keys = jax.random.split(key, 2*n)
-    def loop(chart: chart_struct.Chart, d):
-      lr = lr_arcs.left()
-      rl = rl_arcs.right_non_empty(d, semiring)
-      left = chart.left()
-      right = chart.right_non_empty(d, semiring)
-      score = semiring.add(lr, rl, key=keys[2*d])
-      entries = semiring.einsum("sij,sij,sij->si", left, right, score,
-                                key=keys[2*d+1])
-      return chart.set_entries(d, entries), None
-    if get_config().checkpoint_loops:
-      loop = jax.checkpoint(loop)
-    chart, _ = jax.lax.scan(loop, init_chart, jnp.arange(3, n+3))
-    return chart.get_entries(n+2)[:, 0] + c
-
-  @typed
-  def _structure_forward_Eisner(  # pylint: disable=invalid-name
       self, base_struct: Float[Array, "n n"], semiring: Semiring, key: Key
       ) -> Float[Array, "s"]:
     """Eisner's parsing algorithm.

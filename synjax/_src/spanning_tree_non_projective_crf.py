@@ -24,6 +24,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int32
+import numpy as np
 from synjax._src.config import get_config
 from synjax._src.constants import EPS, MTT_LOG_EPS
 from synjax._src.deptree_algorithms.deptree_padding import pad_log_potentials, directed_tree_mask
@@ -325,7 +326,7 @@ def _construct_laplacian_hat(
     log_potentials: Float[Array, "*batch n n"], single_root_edge: bool
     ) -> Float[Array, "*batch n-1 n-1"]:
   """Computes a graph Laplacian-hat matrix as in Koo et al (2007).
-  
+
   This is not a Laplacian matrix, but Laplacian-hat matrix. It is constructed by
   applying the right modification to a regular Laplacian matrix so that a
   determinant of Laplacian-hat gives partition function of all spanning trees.
@@ -391,7 +392,7 @@ def sample_wilson_numpy_callback(
   result_shape = jax.ShapeDtypeStruct(log_potentials.shape[:-1], jnp.int32)
   # pylint: disable=g-long-lambda
   f = lambda *x: deptree_non_proj_wilson_sampling.vectorized_sample_wilson(
-      *x).astype(jnp.int32)
+      *jax.tree.map(np.asarray, x)).astype(jnp.int32)
   trees = jax.pure_callback(f, result_shape, log_potentials, lengths,
                             single_root_edge, vectorized=True)
   # pytype: disable=bad-return-type
@@ -412,7 +413,8 @@ def mst_numpy_callback(log_potentials: jax.Array, lengths: jax.Array,
   from synjax._src.deptree_algorithms import deptree_non_proj_argmax
   result_shape = jax.ShapeDtypeStruct(log_potentials.shape[:-1], jnp.int32)
   trees = jax.pure_callback(
-      lambda *x: deptree_non_proj_argmax.vectorized_mst(*x).astype(jnp.int32),
+      lambda *x: deptree_non_proj_argmax.vectorized_mst(
+          *jax.tree.map(np.asarray, x)).astype(jnp.int32),
       result_shape, log_potentials, lengths, single_root_edge, vectorized=True)
   # pytype: disable=bad-return-type
   return (_to_adjacency_matrix(trees, lengths),
