@@ -387,7 +387,9 @@ def sample_wilson_numpy_callback(
     ) -> jax.Array:
   """JAX-to-Numba callback for vectorized sampling of spanning trees."""
   result_shape = jax.ShapeDtypeStruct(log_potentials.shape[:-1], jnp.int32)
-  # pylint: disable=g-long-lambda
+  # Triggering Numba compile by a simple call with NumPy arrays.
+  deptree_non_proj_wilson_sampling.vectorized_sample_wilson(
+      log_potentials=np.ones((3, 3)), lengths=None, single_root_edge=True)
   f = lambda *x: deptree_non_proj_wilson_sampling.vectorized_sample_wilson(
       *jax.tree.map(np.asarray, x)).astype(jnp.int32)
   trees = jax.pure_callback(f, result_shape, log_potentials, lengths,
@@ -403,6 +405,9 @@ def mst_numpy_callback(log_potentials: jax.Array, lengths: jax.Array,
                        single_root_edge: bool) -> jax.Array:
   """JAX-to-Numba callback for vectorized Tarjan's maximum spanning tree."""
   result_shape = jax.ShapeDtypeStruct(log_potentials.shape[:-1], jnp.int32)
+  # Triggering Numba compile by a simple call with NumPy arrays.
+  deptree_non_proj_argmax.vectorized_mst(
+      log_potentials=np.ones((3, 3)), lengths=None, single_root_edge=True)
   trees = jax.pure_callback(
       lambda *x: deptree_non_proj_argmax.vectorized_mst(
           *jax.tree.map(np.asarray, x)).astype(jnp.int32),
