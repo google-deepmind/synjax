@@ -70,6 +70,40 @@ def safe_log(x: Array) -> Array:
   # pytype: enable=bad-return-type
 
 
+def bound(x: Array, min_val: float, max_val: float) -> Array:
+  """Clipping that has a margin loss gradients for elements that are clipped.
+
+  This is inspired Donahue et al (2019) who used an additional margin loss to
+  penalize elements that are out of the specified range. This implementation
+  differs in having gradients for the margin loss directly built-in so that
+  the user does not have to manually pass the loss through the whole network.
+
+  Args:
+    x: Input array.
+    min_val: Minimum value for the output array.
+    max_val: Maximum value for the output array.
+  Returns:
+    Clipped array.
+
+  References:
+    Donahue et al (2019) -- Piano Genie -- Equation (1).
+    https://arxiv.org/pdf/1810.05246#page=3
+  """
+  @jax.custom_vjp
+  def f(y):
+    return jnp.clip(y, min_val, max_val)
+
+  def f_fwd(y):
+    return f(y), y
+
+  def f_bwd(res, g):
+    y = res
+    return jnp.where(y < min_val, -1, jnp.where(y > max_val, 1, g)),
+
+  f.defvjp(f_fwd, f_bwd)
+  return f(x)
+
+
 InversionMethod = Literal["solve", "qr"]
 
 
@@ -215,12 +249,6 @@ def sample_one_hot(logits: Array, *, key: Array,
 ############################################################################
 
 
-def split_key_for_shape(key: Array, shape):
-  shape = asshape(shape)
-  keys = jax.random.split(key, shape_size(shape))
-  return keys.reshape(shape+key.shape)
-
-
 def asshape(shape: Union[Shape, int]) -> Shape:
   return (shape,) if isinstance(shape, int) else tuple(shape)
 
@@ -301,8 +329,8 @@ def sparsemax(x: Array, axis: Union[int, Shape] = -1) -> Array:
     return jax.nn.relu(s/idx + (x-jnp.take_along_axis(cumsum_u, idx-1, -1)/idx))
 
   @_sparsemax.defjvp
-  def _sparsemax_jvp(primals: Tuple[Array], tangents: Tuple[Array]
-                    ) -> Tuple[Array, Array]:
+  def _sparsemax_jvp(  # pylint: disable=g-one-element-tuple
+      primals: Tuple[Array], tangents: Tuple[Array]) -> Tuple[Array, Array]:
     x, = primals
     x_dot, = tangents
     primal_out = _sparsemax(x)

@@ -56,9 +56,10 @@ class DepTreeUtilsTest(parameterized.TestCase):
               [0, 0, 0, 0, 0, 0],
               [0, 0, 0, 0, 0, 0]]])))
 
-  def test_pad_log_potentials(self):
+  def test_pad_directed_log_potentials(self):
     log_potentials = jnp.full((6, 6), 2)
-    mask = deptree_padding.pad_log_potentials(log_potentials, jnp.array([4]))
+    mask = deptree_padding.pad_directed_log_potentials(log_potentials,
+                                                       jnp.array([4]))
     ninf = -constants.INF
     self.assertTrue(jnp.allclose(
         mask.astype(jnp.int32),

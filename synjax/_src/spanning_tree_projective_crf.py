@@ -22,7 +22,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Int32
 from synjax._src.config import get_config
-from synjax._src.deptree_algorithms.deptree_padding import pad_log_potentials, directed_tree_mask
+from synjax._src.deptree_algorithms.deptree_padding import pad_directed_log_potentials, directed_tree_mask
 from synjax._src.distribution import SemiringDistribution
 from synjax._src.typing import Shape, Key, typed
 from synjax._src.utils import chart_struct
@@ -60,7 +60,7 @@ class SpanningTreeProjectiveCRF(SemiringDistribution):
 
   @property
   def _padded_log_potentials(self) -> Float[Array, "*batch n n"]:
-    return pad_log_potentials(self.log_potentials, self.lengths)
+    return pad_directed_log_potentials(self.log_potentials, self.lengths)
 
   def argmax_and_max(self, *args, **kwargs) -> Float[Array, "*batch n n"]:
     # Default argmax_and_max with an addition of removing padding.

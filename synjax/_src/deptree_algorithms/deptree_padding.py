@@ -23,8 +23,11 @@ Array = jax.Array
 INF = constants.INF
 
 
-def pad_log_potentials(log_potentials: Array, length: Array) -> Array:
-  """Pads adjecancy matrix of log_potentials so that it has same log_partition.
+def pad_directed_log_potentials(log_potentials: Array, length: Array) -> Array:
+  """Pads adjacency matrix of log_potentials so that it has same log_partition.
+
+  Sets padded arcs to have weight 0, valid arcs to have their original weight
+  and invalid arcs to have weight -INF.
 
   Args:
     log_potentials: Log-potentials of shape (..., n, n) for n nodes.
@@ -35,11 +38,8 @@ def pad_log_potentials(log_potentials: Array, length: Array) -> Array:
   max_nodes = log_potentials.shape[-1]
   padding_mask = _mask_for_padding(max_nodes, length)
   potentials_mask = directed_tree_mask(max_nodes, length)
-  # Set padded elems to 0.
-  log_potentials = jnp.where(padding_mask, 0, log_potentials)
-  # Ignore everything else except padding and selected potentials.
-  log_potentials = jnp.where(potentials_mask|padding_mask, log_potentials, -INF)
-  return log_potentials
+  return jnp.where(potentials_mask, log_potentials,
+                   jnp.where(padding_mask, 0, -INF))
 
 
 def _mask_for_padding(max_nodes: int, lengths: Array) -> Array:

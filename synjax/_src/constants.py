@@ -14,8 +14,8 @@
 
 """Some constants used throughout SynJax."""
 
-INF = 1e5
+INF = 1e5  # pystyle: disable=invalid-name
 EPS = 1e-5
-MTT_LOG_EPS = -15
+MTT_MIN_LOG_POTENTIAL = -10
 TESTING_RELATIVE_TOLERANCE = 1e-3
 TESTING_ABSOLUTE_TOLERANCE = 1e-3

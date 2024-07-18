@@ -37,7 +37,7 @@ vmap_ndim = special.vmap_ndim
 grad_ndim = special.grad_ndim
 is_shape = special.is_shape
 
-Self = TypeVar("Self")
+Self = TypeVar("Self", bound="Distribution")
 Event = PyTree[Float[Array, "..."]]
 SoftEvent = PyTree[Float[Array, "..."]]
 
@@ -95,7 +95,7 @@ class Distribution(eqx.Module):
       A sample of shape `sample_shape` + `batch_shape` + `event_shape`.
     """
     sample_shape = special.asshape(sample_shape)
-    keys = special.split_key_for_shape(key, sample_shape)
+    keys = jax.random.split(key, sample_shape)
     dist = self.with_temperature(temperature)
     fn = lambda key: dist._single_sample(key=key, **kwargs)
     return vmap_ndim(fn, len(sample_shape))(keys)
@@ -466,7 +466,7 @@ class SemiringDistribution(Distribution):
     Returns:
       Single sample for each distribution in the batch.
     """
-    keys = special.split_key_for_shape(key, self.batch_shape)
+    keys = jax.random.split(key, self.batch_shape)
     sr = semirings.SamplingSemiring(relaxation=relaxation)
     def f(base_struct, dist, akey):
       return sr.unwrap(dist._structure_forward(base_struct, sr, akey, **kwargs))

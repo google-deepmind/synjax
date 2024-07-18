@@ -22,7 +22,7 @@ import numpy as np
 from synjax._src import constants
 
 EPS = constants.EPS
-MTT_LOG_EPS = constants.MTT_LOG_EPS
+MTT_MIN_LOG_POTENTIAL = constants.MTT_MIN_LOG_POTENTIAL
 
 
 @numba.njit
@@ -36,11 +36,11 @@ def _construct_laplacian_hat(log_potentials: np.ndarray, single_root_edge: bool
   Returns:
     Laplacian matrix.
   """
-  potentials = np.exp(np.logaddexp(log_potentials, MTT_LOG_EPS))
+  potentials = np.exp(log_potentials)
   potentials[..., 0] = 0  # Removing root-entering edges.
   potentials *= (1-np.eye(potentials.shape[-1]))  # Removing self-edges
   def laplacian(x):  # Standard complete Laplacian matrix.
-    return np.expand_dims(np.sum(x, axis=-2), axis=-2) * np.eye(x.shape[-1]) - x
+    return np.sum(x, axis=-2)[..., None, :] * np.eye(x.shape[-1]) - x
   def cut(x):  # Removes 0th row and 0th column.
     return x[..., 1:, 1:]
   if single_root_edge:
@@ -49,6 +49,12 @@ def _construct_laplacian_hat(log_potentials: np.ndarray, single_root_edge: bool
   else:
     l = cut(laplacian(potentials))  # (..., n-1, n-1)
   return l
+
+
+@numba.njit
+def _diagonal(tensor):
+  # This is needed because Numba doesn't support np.diagonal.
+  return np.sum(tensor * np.eye(tensor.shape[-1]), -1)
 
 
 @numba.njit
@@ -67,23 +73,23 @@ def _marginals_with_given_laplacian_invt(
   Returns:
     Matrix of marginals.
   """
-  potentials = np.exp(np.logaddexp(log_potentials, MTT_LOG_EPS))
+  potentials = np.exp(log_potentials)
   marginals = np.zeros(potentials.shape)
 
-  x = np.diag(laplacian_invt).copy()  # Extract diagonal of laplacian inverse.
+  x = _diagonal(laplacian_invt).copy()
   if single_root_edge:
-    x[0] = 0
-  x_matrix = x.reshape(1, -1)  # (1, n)
+    x[..., 0] = 0
+  x_matrix = x[..., None, :]  # (1, n)
 
   y_matrix = laplacian_invt.copy()
   if single_root_edge:
-    y_matrix[0] = 0
+    y_matrix[..., 0, :] = 0
 
-  marginals[1:, 1:] = potentials[1:, 1:] * (x_matrix - y_matrix)
+  marginals[..., 1:, 1:] = potentials[..., 1:, 1:] * (x_matrix - y_matrix)
   if single_root_edge:
-    marginals[0, 1:] = potentials[0, 1:] * laplacian_invt[0]
+    marginals[..., 0, 1:] = potentials[..., 0, 1:] * laplacian_invt[..., 0, :]
   else:
-    marginals[0, 1:] = potentials[0, 1:] * np.diag(laplacian_invt)
+    marginals[..., 0, 1:] = potentials[..., 0, 1:] * _diagonal(laplacian_invt)
   marginals = np.where(np.isnan(marginals) | (marginals < 0), 0, marginals)
   return marginals
 
@@ -149,6 +155,10 @@ def _vectorized_sample_wilson(log_potentials, length, single_root_edge, res):
 
 def vectorized_sample_wilson(log_potentials, lengths, single_root_edge):
   """Vectorized version of wilson algorithm that returns a single sample."""
+  # Stabilizing log-potentials.
+  log_potentials = log_potentials - log_potentials.max(axis=-2, keepdims=True)
+  log_potentials = np.maximum(log_potentials, MTT_MIN_LOG_POTENTIAL)
+
   single_root_edge_extended = np.full(
       log_potentials.shape[:-2], single_root_edge, dtype=np.int64)
   if lengths is None:

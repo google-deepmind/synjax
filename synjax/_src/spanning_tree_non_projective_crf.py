@@ -26,8 +26,9 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float, Int32
 import numpy as np
 from synjax._src.config import get_config
-from synjax._src.constants import EPS, MTT_LOG_EPS
-from synjax._src.deptree_algorithms.deptree_padding import pad_log_potentials, directed_tree_mask
+from synjax._src.constants import EPS
+from synjax._src.deptree_algorithms import deptree_non_proj_argmax, deptree_non_proj_wilson_sampling
+from synjax._src.deptree_algorithms.deptree_padding import pad_directed_log_potentials, directed_tree_mask
 from synjax._src.distribution import Distribution
 from synjax._src.typing import Shape, Key, typed
 from synjax._src.utils import autoregressive_decoding
@@ -39,7 +40,7 @@ SamplingAlgorithmName = Literal["colbourn", "wilson"]
 
 @typed
 def _optionally_shift_log_potentials(
-    log_potentials: Float[Array, "*batch n n"], single_root_edge: bool
+    log_potentials: Float[Array, "*batch n n"]
     ) -> Tuple[Float[Array, "*batch n n"], Float[Array, "*batch"]]:
   """Makes log-potentials numerically more stable.
 
@@ -47,30 +48,21 @@ def _optionally_shift_log_potentials(
   any impact on the tree distribution. Inspired by see Section D.2 from
   Paulus et al (2020). This implementation is more stable than
   Paulus et al because max normalization it is applied column-wise and in that
-  way guarantees that the maximum score of a tree is not bigger than 0, but it
-  breaks the symmetry if there was any.
+  way guarantees that the maximum score of a tree is not bigger than 0. It will
+  not change the probability distribution, but it will change the normalization
+  constant. The quantity by which it is changed is returned as a second output.
 
   References:
     Paulus et al 2020 - Section D2: https://arxiv.org/pdf/2006.08063.pdf#page=26
 
   Args:
     log_potentials: Log-potentials of the graph.
-    single_root_edge: Whether to renormalize the root outgoing edges which is
-                      valid only if single-root constraint is used.
-
   Returns:
     New log potentials with correction for log-partition.
   """
-  cfg = get_config()
-  if cfg.mtt_shift_log_potentials:
+  if get_config().mtt_shift_log_potentials:
     c_matrix = jnp.max(log_potentials, axis=-2, keepdims=True)
     correction = jnp.sum(c_matrix[..., 0, 1:], -1)
-    if single_root_edge:
-      c_root = jnp.max(
-          log_potentials*jax.nn.one_hot(0, log_potentials.shape[-1])[:, None],
-          axis=-1, keepdims=True)
-      c_matrix += c_root
-      correction += c_root[..., 0, -1]
     log_potentials -= jax.lax.stop_gradient(c_matrix.at[..., :, 0].set(0))
   else:
     correction = jnp.zeros(log_potentials.shape[:-2])
@@ -168,12 +160,15 @@ class SpanningTreeNonProjectiveCRF(Distribution):
 
   @property
   def _padded_log_potentials(self) -> Float[Array, "*batch n n"]:
-    return pad_log_potentials(self.log_potentials, self.lengths)
+    return pad_directed_log_potentials(self.log_potentials, self.lengths)
 
   @typed
   def log_partition(self) -> Float[Array, "*batch"]:
     log_potentials, correction = _optionally_shift_log_potentials(
-        self._padded_log_potentials, self.single_root_edge)
+        self._padded_log_potentials)
+    log_potentials = special.bound(log_potentials,
+                                   get_config().mtt_min_log_potential,
+                                   get_config().mtt_max_log_potential)
     laplacian_hat = _construct_laplacian_hat(log_potentials,
                                              self.single_root_edge)
     return correction + _custom_slog_det(laplacian_hat)[1]
@@ -207,7 +202,7 @@ class SpanningTreeNonProjectiveCRF(Distribution):
                                      single_root_edge=self.single_root_edge),
             max_length=self.max_nodes-1,
             k=k), self.batch_ndim
-        )(special.split_key_for_shape(key, self.batch_shape),
+        )(jax.random.split(key, self.batch_shape),
           self._padded_log_potentials)
     sampled_trees = beam_state.sample
     move = lambda x: jnp.moveaxis(x, self.batch_ndim, 0)
@@ -226,7 +221,7 @@ class SpanningTreeNonProjectiveCRF(Distribution):
                                        single_root_edge=self.single_root_edge),
               key=rng, max_length=self.max_nodes-1, unroll=1),
           self.batch_ndim
-          )(special.split_key_for_shape(key, self.batch_shape),
+          )(jax.random.split(key, self.batch_shape),
             self._padded_log_potentials)
       sampled_trees = final_states.sample
       sampled_matrices = _to_adjacency_matrix(sampled_trees, self.lengths)
@@ -263,6 +258,7 @@ class State(autoregressive_decoding.State):
     Zmigrod et al, 2021: https://aclanthology.org/2021.emnlp-main.824v2.pdf
     Colbourn et al, 1996: https://www.sciencedirect.com/science/article/pii/S0196677496900140
   """  # pylint: disable=line-too-long
+  # pylint: enable=line-too-long
 
   potentials: Float[Array, "n n"]
   laplacian: Float[Array, "n-1 n-1"]
@@ -296,7 +292,8 @@ class State(autoregressive_decoding.State):
     constrained_incoming = jax.nn.one_hot(i, potentials_old.shape[-1])
     potentials = potentials_old.at[..., j].set(constrained_incoming)
 
-    laplacian = _construct_laplacian_hat(jnp.log(potentials), self.single_root_edge)
+    laplacian = _construct_laplacian_hat(jnp.log(potentials),
+                                         self.single_root_edge)
 
     uj = laplacian[:, j - 1] - laplacian_old[:, j - 1]
     bj = laplacian_invt_old[:, j - 1]
@@ -311,8 +308,13 @@ class State(autoregressive_decoding.State):
 
   @staticmethod
   @typed
-  def initial(log_potentials: Float[Array, "n n"], single_root_edge: bool) -> State:
+  def initial(log_potentials: Float[Array, "n n"], single_root_edge: bool
+              ) -> State:
     empty_sample = jnp.empty(log_potentials.shape[-1], dtype=jnp.int32)
+    log_potentials, _ = _optionally_shift_log_potentials(log_potentials)
+    log_potentials = special.bound(log_potentials,
+                                   get_config().mtt_min_log_potential,
+                                   get_config().mtt_max_log_potential)
     laplacian = _construct_laplacian_hat(log_potentials,
                                          single_root_edge=single_root_edge)
     laplacian_invt = jnp.linalg.inv(laplacian).T
@@ -339,8 +341,9 @@ def _construct_laplacian_hat(
   Returns:
     Laplacian matrix.
   """
-  potentials = jnp.exp(jnp.logaddexp(log_potentials, MTT_LOG_EPS))
-  potentials *= 1-jnp.eye(potentials.shape[-1])  # Removing self-edges
+  potentials = jnp.exp(log_potentials)
+  potentials *= 1-jnp.eye(potentials.shape[-1])  # Removing self-edges.
+  potentials = potentials.at[..., 0].set(0)  # Removing root entering edges.
   laplacian = lambda x: x.sum(axis=-2, keepdims=True) * jnp.eye(x.shape[-1]) - x
   cut = lambda x: x[..., 1:, 1:]
   if single_root_edge:
@@ -383,12 +386,6 @@ def sample_wilson_numpy_callback(
     log_potentials: jax.Array, lengths: jax.Array, single_root_edge: bool
     ) -> jax.Array:
   """JAX-to-Numba callback for vectorized sampling of spanning trees."""
-  # The import is located here so that if users do not
-  # call Numba code the Numba compilation won't be triggered and potential
-  # irrelevant compilation errors won't appear.
-  # pylint: disable=g-import-not-at-top
-  # pylint: disable=import-outside-toplevel
-  from synjax._src.deptree_algorithms import deptree_non_proj_wilson_sampling
   result_shape = jax.ShapeDtypeStruct(log_potentials.shape[:-1], jnp.int32)
   # pylint: disable=g-long-lambda
   f = lambda *x: deptree_non_proj_wilson_sampling.vectorized_sample_wilson(
@@ -405,12 +402,6 @@ def sample_wilson_numpy_callback(
 def mst_numpy_callback(log_potentials: jax.Array, lengths: jax.Array,
                        single_root_edge: bool) -> jax.Array:
   """JAX-to-Numba callback for vectorized Tarjan's maximum spanning tree."""
-  # The import is located here so that if users do not call Numba code the
-  # Numba compilation won't be triggered and potential irrelevant
-  # compilation errors won't appear.
-  # pylint: disable=g-import-not-at-top
-  # pylint: disable=import-outside-toplevel
-  from synjax._src.deptree_algorithms import deptree_non_proj_argmax
   result_shape = jax.ShapeDtypeStruct(log_potentials.shape[:-1], jnp.int32)
   trees = jax.pure_callback(
       lambda *x: deptree_non_proj_argmax.vectorized_mst(

@@ -16,7 +16,7 @@
 
 # pylint: disable=g-importing-member
 # pylint: disable=g-multiple-import
-from synjax._src.utils.special import inv, safe_slogdet, safe_log, sparsemax
+from synjax._src.utils.special import inv, safe_slogdet, safe_log, sparsemax, bound, vmap_ndim, sample_one_hot, max_one_hot, log_comb, log_catalan, log_delannoy
 
 
 __all__ = [
@@ -24,4 +24,11 @@ __all__ = [
     "safe_log",
     "inv",
     "sparsemax",
+    "bound",
+    "vmap_ndim",
+    "sample_one_hot",
+    "max_one_hot",
+    "log_comb",
+    "log_catalan",
+    "log_delannoy",
 ]

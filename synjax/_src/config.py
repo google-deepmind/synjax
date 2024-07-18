@@ -18,6 +18,7 @@ import dataclasses
 import functools
 from typing import Literal
 from synjax._src.typing import typed  # pylint: disable=g-importing-member
+from synjax._src import constants
 
 
 @typed
@@ -29,6 +30,8 @@ class SynJaxConfig():
   checkpoint_semiring_einsum: bool = True
   # Matrix-Tree Theorem settings
   mtt_shift_log_potentials: bool = True
+  mtt_min_log_potential: float = constants.MTT_MIN_LOG_POTENTIAL
+  mtt_max_log_potential: float = constants.INF
   mtt_logdet_method: Literal["lu", "qr"] = "lu"
   mtt_inv_method: Literal["solve", "qr"] = "solve"
   mtt_inv_matmul_precision: Literal["default", "high", "highest"] = "default"
