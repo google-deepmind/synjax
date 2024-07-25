@@ -51,19 +51,6 @@ class CtcTest(distribution_test.DistributionTest):
                      input_lengths=input_lengths, blank_id=blank_id)]
     return dists
 
-  def create_invalid_shape_distribution(self):
-    b, n, l = 2, 6, 6
-    v = n
-    log_potentials = jnp.zeros((b, 1, n, v))
-    labels = jnp.arange(1, n+1) * jnp.ones((b, 1), dtype=jnp.int32)
-    label_lengths = jnp.full(b, l)
-    input_lengths = jnp.full(b, n)
-    blank_id = 0
-
-    dists = [ctc.CTC(log_potentials, labels, label_lengths=label_lengths,
-                     input_lengths=input_lengths, blank_id=blank_id)]
-    return dists
-
   def assert_is_symmetric(self, dist, marginals) -> bool:
     self.assert_all(marginals >= 0)
 

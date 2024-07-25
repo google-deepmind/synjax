@@ -53,7 +53,7 @@ class Distribution(eqx.Module):
   def log_count(self, **kwargs) -> Float[Array, "*batch"]:
     """Log of the count of structures in the support."""
     params, non_params = eqx.partition(self, eqx.is_inexact_array)
-    params = jax.tree.map(lambda x: jnp.where(x <= -INF, -INF, 0), params)
+    params = jtu.tree_map(lambda x: jnp.where(x <= -INF, -INF, 0), params)
     return eqx.combine(params, non_params).log_partition(**kwargs)
 
   @property
@@ -204,7 +204,7 @@ class Distribution(eqx.Module):
       Martins and Astudillo, 2016: http://proceedings.mlr.press/v48/martins16.pdf
     """  # pylint: disable=line-too-long
     bcast = lambda x: jnp.broadcast_to(x, special.asshape(sample_shape)+x.shape)
-    dist = jax.tree.map(bcast, self)
+    dist = jtu.tree_map(bcast, self)
 
     if method in ["Perturb-and-SoftmaxDP", "Perturb-and-SparsemaxDP",
                   "Gumbel-CRF"] and not isinstance(self, SemiringDistribution):
@@ -253,7 +253,7 @@ class Distribution(eqx.Module):
     r"""Unnormalized probability of an event."""
     bcast_ndim = self._bcast_ndim(event)
     f = lambda a, b: jnp.sum(a*b, range(bcast_ndim+self.batch_ndim, a.ndim))
-    leaf_sums = jax.tree.map(f, event, self.log_potentials)
+    leaf_sums = jtu.tree_map(f, event, self.log_potentials)
     return vmap_ndim(special.tsum_all, bcast_ndim+self.batch_ndim)(leaf_sums)
 
   def _bcast_ndim(self, event: Event) -> int:
@@ -269,7 +269,7 @@ class Distribution(eqx.Module):
   def marginals_for_template_variables(self: Self, **kwargs) -> Self:
     """Marginal prob. of template parts (e.g. PCFG rules instead tree nodes)."""
     grad_f = grad_ndim(lambda x: x.log_partition(**kwargs), self.batch_ndim)
-    return jax.tree.map(jnp.nan_to_num, grad_f(self))
+    return jtu.tree_map(jnp.nan_to_num, grad_f(self))
 
   @typed
   def marginals(self, **kwargs) -> SoftEvent:
@@ -279,7 +279,7 @@ class Distribution(eqx.Module):
   @typed
   def log_marginals(self, **kwargs) -> SoftEvent:
     """Logs of marginal probability of structure's parts."""
-    return jax.tree.map(special.safe_log, self.marginals(**kwargs))
+    return jtu.tree_map(special.safe_log, self.marginals(**kwargs))
 
   @typed
   def argmax(self, **kwargs) -> Event:
@@ -372,7 +372,7 @@ class Distribution(eqx.Module):
 
   def __getitem__(self: Self, i) -> Self:
     """If distribution is batched, indexes sub-distribution from the batch."""
-    return jax.tree.map(lambda x: x[i], self)
+    return jtu.tree_map(lambda x: x[i], self)
 
 
 class SemiringDistribution(Distribution):
@@ -401,7 +401,7 @@ class SemiringDistribution(Distribution):
       def f_single_sample_single_batch(
           base_struct: SoftEvent, dist: Self) -> Float[Array, ""]:
         return sr.unwrap(dist._structure_forward(
-            jax.tree.map(lambda x: jnp.where(x, 0, -INF), base_struct),
+            jtu.tree_map(lambda x: jnp.where(x, 0, -INF), base_struct),
             sr, key=key, **kwargs))
       def f_single_sample_multi_batch(base_struct: SoftEvent
                                       ) -> Float[Array, "*batch"]:
@@ -448,7 +448,7 @@ class SemiringDistribution(Distribution):
       return sr.unwrap(dist._structure_forward(
           base_struct, sr, key=jax.random.PRNGKey(0), **kwargs))
     m = grad_ndim(f, self.batch_ndim)(self._batched_base_structure(), self)
-    return jax.tree.map(jnp.nan_to_num, m)
+    return jtu.tree_map(jnp.nan_to_num, m)
 
   @typed
   def _single_sample(
@@ -492,7 +492,7 @@ class SemiringDistribution(Distribution):
     if k == 1:
       # This is a shortcut optimization for a special case.
       best, score = self.argmax_and_max()
-      expand = partial(jax.tree.map, lambda x: x[None])
+      expand = partial(jtu.tree_map, lambda x: x[None])
       return expand(best), expand(score)
     def kbest_forward(base_struct, dist):
       kbest_scores = dist._structure_forward(
@@ -504,7 +504,7 @@ class SemiringDistribution(Distribution):
     kbest_structs, kbest_scores = vmap_ndim(kbest_per_dist, self.batch_ndim)(
         self._batched_base_structure(), self)
     move = lambda x: jnp.moveaxis(x, self.batch_ndim, 0)
-    kbest_structs = jax.tree.map(move, kbest_structs)
+    kbest_structs = jtu.tree_map(move, kbest_structs)
     kbest_scores = move(kbest_scores)
     return kbest_structs, kbest_scores
 

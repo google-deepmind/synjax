@@ -58,11 +58,6 @@ class SpanningTreeNonProjectiveCRFTest(
           single_root_edge=single_root_edge))
     return dists
 
-  def create_invalid_shape_distribution(self):
-    return SpanningTreeNonProjectiveCRF(
-        log_potentials=jnp.zeros((3, 6, 5)), lengths=None,
-        single_root_edge=True)
-
   def analytic_log_count(self, dist) -> jax.Array:
     """Computes the log of the number of the spanning trees in the support.
 

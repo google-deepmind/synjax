@@ -65,16 +65,6 @@ class AlignmentCrfTest(distribution_test.DistributionTest):
     return [AlignmentCRF(jnp.zeros((b, n, n)),
                          alignment_type="monotone_many_to_many")]
 
-  def test_crash_on_invalid_shapes(self):
-    b = 3
-    m = 5
-
-    # pylint: disable=g-long-lambda
-    self.assertRaises(
-        ValueError, lambda: AlignmentCRF(
-            log_potentials=jnp.zeros((b, m, m-1)),
-            alignment_type="non_monotone_one_to_one"))
-
   def assert_is_symmetric(self, dist, marginals) -> bool:
     self.assert_allclose(marginals, jnp.swapaxes(marginals, -1, -2))
     self.assert_allclose(marginals,

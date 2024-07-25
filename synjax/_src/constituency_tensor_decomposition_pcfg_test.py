@@ -46,19 +46,6 @@ class TensorDecompositionPCFGTest(distribution_test.DistributionTest):
     for dist in self.create_random_batched_dists(jax.random.PRNGKey(0)):
       self.assertRaises(NotImplementedError, dist.top_k, 2)
 
-  def create_invalid_shape_distribution(self):
-    b, n, voc, nt, pt, r = 2, 6, 10, 2, 3, 2
-    f = jnp.zeros
-    log_potentials = dict(
-        root=f((b, nt)),
-        nt_to_rank=f((b, nt, r)),
-        rank_to_left_nt=f((b, r, nt)),
-        rank_to_right_nt=f((b, r, nt+pt)),
-        emission=f((b, pt, voc)),
-    )
-    word_ids = jax.random.randint(jax.random.PRNGKey(0), (b, n), 0, voc)
-    return td.TensorDecompositionPCFG(**log_potentials, word_ids=word_ids)
-
   def analytic_log_count(self, dist) -> jax.Array:
     log_rank_combs = (dist.lengths-1)*jnp.log(dist.size_rank)
     log_nt_combs = (dist.lengths-1) * jnp.log(

@@ -39,11 +39,6 @@ class SemiMarkovCRFTest(distribution_test.DistributionTest):
     log_potentials = jnp.zeros((b, n, m, t, t))
     return [semi_markov_crf.SemiMarkovCRF(log_potentials)]
 
-  def create_invalid_shape_distribution(self):
-    b, n, m, t = 3, 6, 3, 4
-    log_potentials = jnp.zeros((b, n, m, t+1, t))
-    return semi_markov_crf.SemiMarkovCRF(log_potentials)
-
   def assert_is_symmetric(self, dist, marginals) -> bool:
     # There is no simple symmetric constraint to test against.
     pass

@@ -20,6 +20,7 @@ from typing import Sequence, Optional, Union, Literal
 
 import jax
 import jax.numpy as jnp
+import jax.tree_util as jtu
 
 # pylint: disable=g-importing-member
 from synjax._src.config import get_config
@@ -79,11 +80,11 @@ class Semiring(metaclass=abc.ABCMeta):
     Returns:
       Log-potentials adapted to a particular semiring.
     """
-    return jax.tree.map(lambda x: x[None], log_potentials)
+    return jtu.tree_map(lambda x: x[None], log_potentials)
 
   def unwrap(self, wrapped):
     """Reverses the effect of Semiring.wrap()."""
-    return jax.tree.map(lambda x: x.squeeze(0), wrapped)
+    return jtu.tree_map(lambda x: x.squeeze(0), wrapped)
 
   def one(self, shape=()) -> Array:
     return self.wrap(jnp.zeros(shape))

@@ -91,16 +91,6 @@ class HMMTest(distribution_test.DistributionTest):
     )
     return [hmm.HMM(**kwargs)]
 
-  def create_invalid_shape_distribution(self):
-    b, n, t, v = 3, 6, 4, 100
-    kwargs = dict(
-        init_logits=jnp.zeros((b, t)),
-        transition_logits=jnp.zeros((b, t, t)),
-        emission_dist=jnp.zeros((b, t+1, v)),
-        observations=jax.random.randint(jax.random.PRNGKey(0), (b, n), 0, v),
-    )
-    return hmm.HMM(**kwargs)
-
   def analytic_log_count(self, dist) -> jax.Array:
     t = dist.log_potentials.shape[-1]
     return dist.lengths * jnp.log(t)

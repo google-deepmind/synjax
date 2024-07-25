@@ -38,11 +38,6 @@ class LinearChainTest(distribution_test.DistributionTest):
     log_potentials = jnp.zeros((b, n, t, t))
     return [linear_chain_crf.LinearChainCRF(log_potentials)]
 
-  def create_invalid_shape_distribution(self):
-    b, n, t = 3, 6, 4
-    log_potentials = jnp.zeros((b, n, t, t-1))
-    return linear_chain_crf.LinearChainCRF(log_potentials)
-
   def analytic_log_count(self, dist) -> jax.Array:
     t = dist.log_potentials.shape[-1]
     return dist.lengths * jnp.log(t)

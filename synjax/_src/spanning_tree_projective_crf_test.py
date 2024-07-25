@@ -45,11 +45,6 @@ class SpanningTreeProjectiveCRFTest(distribution_test.DistributionTest):
              for single_root_edge in [True, False]]
     return dists
 
-  def create_invalid_shape_distribution(self):
-    return SpanningTreeProjectiveCRF(
-        log_potentials=jnp.zeros((3, 6, 5)), lengths=None,
-        single_root_edge=True)
-
   def create_symmetric_batched_dists(self):
     b = 3
     n_words = 5

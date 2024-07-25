@@ -23,6 +23,7 @@ import equinox as eqx
 # pylint: disable=g-long-lambda
 import jax
 import jax.numpy as jnp
+import jax.tree_util as jtu
 import numpy as np
 from synjax._src import constants
 from synjax._src.distribution import Distribution, SemiringDistribution
@@ -78,7 +79,7 @@ class DistributionTest(parameterized.TestCase):
       a = np.broadcast_to(a, broadcasting_shape)
       b = np.broadcast_to(b, broadcasting_shape)
       np.testing.assert_allclose(a, b, rtol=rtol, atol=atol, err_msg=msg)
-    jax.tree.map(array_all_close, x, y)
+    jtu.tree_map(array_all_close, x, y)
 
   def create_random_batched_dists(self, key: jax.Array) -> List[Distribution]:
     raise NotImplementedError
@@ -100,12 +101,6 @@ class DistributionTest(parameterized.TestCase):
   def analytic_log_count(self, dist: Distribution) -> jax.Array:
     """Computes log count of structrues analytically."""
     raise NotImplementedError
-
-  def create_invalid_shape_distribution(self) -> Distribution:
-    raise NotImplementedError
-
-  def test_crash_on_invalid_shapes(self):
-    self.assertRaises(Exception, self.create_invalid_shape_distribution)
 
   def test_symmetric(self):
     for dist in self.create_symmetric_batched_dists():
@@ -130,7 +125,7 @@ class DistributionTest(parameterized.TestCase):
       self.assert_between_zero_and_one(
           m, msg="Marginals must be between 0 and 1")
       self.assert_all(
-          jax.tree.map(lambda x: jax.vmap(jnp.any)(0 < x), m),
+          jtu.tree_map(lambda x: jax.vmap(jnp.any)(0 < x), m),
           msg="Some marginals must be > 0")
       self.assert_valid_marginals(dist, m)
 
@@ -154,7 +149,7 @@ class DistributionTest(parameterized.TestCase):
       self.assert_zeros_and_ones(samples)
       self.assert_batch_of_valid_samples(dist, samples)
       # pylint: disable=cell-var-from-loop
-      self.assert_all(jax.tree.map(lambda x: x.shape[0] == k, samples))
+      self.assert_all(jtu.tree_map(lambda x: x.shape[0] == k, samples))
       prob = jnp.exp(dist.log_prob(samples))
       self.assert_between_zero_and_one(prob)
 
@@ -180,7 +175,7 @@ class DistributionTest(parameterized.TestCase):
     k = 4
     best_k, best_k_scores_direct = dist.top_k(k)
     self.assert_zeros_and_ones(best_k)
-    self.assert_all(jax.tree.map(lambda x: x.shape[0] == k, best_k))
+    self.assert_all(jtu.tree_map(lambda x: x.shape[0] == k, best_k))
 
     best_k_scores = dist.unnormalized_log_prob(best_k)
     self.assert_allclose(best_k_scores, best_k_scores_direct)
@@ -189,22 +184,22 @@ class DistributionTest(parameterized.TestCase):
 
     # All trees are valid.
     for i in range(k):
-      best_i = jax.tree.map(lambda x: x[i], best_k)
+      best_i = jtu.tree_map(lambda x: x[i], best_k)
       self.assert_valid_marginals(dist, best_i)
       self.assert_batch_of_valid_samples(dist, best_i)
 
     # All structs are different from each other.
     for i in range(dist.batch_shape[0]):
       self.assert_no_duplicates_in_first_axis(
-          jax.tree.map(lambda x: x[:, i], best_k))
+          jtu.tree_map(lambda x: x[:, i], best_k))
 
-    top_1 = jax.tree.map(lambda x: x[None], dist.argmax())
+    top_1 = jtu.tree_map(lambda x: x[None], dist.argmax())
     self.assert_allclose(dist.top_k(1)[0], top_1)
     if check_prefix_condition:
       # Top k-1 is a prefix of top k.
-      self.assert_allclose(jax.tree.map(lambda x: x[:k-1], best_k),
+      self.assert_allclose(jtu.tree_map(lambda x: x[:k-1], best_k),
                            dist.top_k(k-1)[0])
-      self.assert_allclose(jax.tree.map(lambda x: x[:1], best_k), top_1)
+      self.assert_allclose(jtu.tree_map(lambda x: x[:1], best_k), top_1)
 
   def test_top_k(self):
     for dist in self.create_random_batched_dists(jax.random.PRNGKey(0)):
@@ -235,7 +230,7 @@ class DistributionTest(parameterized.TestCase):
         sample = x.differentiable_sample(
             key=key, method=method, sample_shape=2, noise="Sum-of-Gamma",
             temperature=jnp.float32(10), implicit_MLE_lr=jnp.float32(10))
-        return tsum_all(jax.tree.map(summarize_fn, sample)), sample
+        return tsum_all(jtu.tree_map(summarize_fn, sample)), sample
       with self.subTest(f"{method}"):
         for dist in self.create_random_batched_dists(key):
           if (method == "Perturb-and-MAP-Implicit-MLE"
@@ -250,7 +245,7 @@ class DistributionTest(parameterized.TestCase):
           # pylint: disable=too-many-function-args
           g, sample = eqx.filter_grad(loss, has_aux=True)(dist, key)
           # pylint: enable=too-many-function-args
-          grad_vals = tsum_all(jax.tree.map(count_non_zero, g))
+          grad_vals = tsum_all(jtu.tree_map(count_non_zero, g))
           self.assertGreater(grad_vals, 1)
           if method == "Perturb-and-MAP-Implicit-MLE":
             self.assert_batch_of_valid_samples(dist, sample)

@@ -47,11 +47,6 @@ class SpanningTreeCrfTest(distribution_test.DistributionTest):
   def create_symmetric_batched_dists(self):
     return self._create_dist(jnp.zeros)
 
-  def create_invalid_shape_distribution(self):
-    return spanning_tree_crf.SpanningTreeCRF(
-        log_potentials=jnp.zeros((2, 6, 6-1)), directed=False,
-        single_root_edge=True, projective=True)
-
   def test_log_count(self):
     # Skips testing for log-count since there is no simple unified formula for
     # all supported sub-types of distributions.

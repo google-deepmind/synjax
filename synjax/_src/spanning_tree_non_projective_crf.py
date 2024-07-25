@@ -23,6 +23,7 @@ from typing import Literal, Optional, Tuple
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import jax.tree_util as jtu
 from jaxtyping import Array, Float, Int32
 import numpy as np
 from synjax._src.config import get_config
@@ -391,7 +392,7 @@ def sample_wilson_numpy_callback(
   deptree_non_proj_wilson_sampling.vectorized_sample_wilson(
       log_potentials=np.ones((3, 3)), lengths=None, single_root_edge=True)
   f = lambda *x: deptree_non_proj_wilson_sampling.vectorized_sample_wilson(
-      *jax.tree.map(np.asarray, x)).astype(jnp.int32)
+      *jtu.tree_map(np.asarray, x)).astype(jnp.int32)
   trees = jax.pure_callback(f, result_shape, log_potentials, lengths,
                             single_root_edge, vectorized=True)
   # pytype: disable=bad-return-type
@@ -410,7 +411,7 @@ def mst_numpy_callback(log_potentials: jax.Array, lengths: jax.Array,
       log_potentials=np.ones((3, 3)), lengths=None, single_root_edge=True)
   trees = jax.pure_callback(
       lambda *x: deptree_non_proj_argmax.vectorized_mst(
-          *jax.tree.map(np.asarray, x)).astype(jnp.int32),
+          *jtu.tree_map(np.asarray, x)).astype(jnp.int32),
       result_shape, log_potentials, lengths, single_root_edge, vectorized=True)
   # pytype: disable=bad-return-type
   return (_to_adjacency_matrix(trees, lengths),

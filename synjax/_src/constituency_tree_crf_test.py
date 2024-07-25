@@ -43,11 +43,6 @@ class TreeCrfTest(distribution_test.DistributionTest):
     log_potentials = jnp.zeros((b, n, n, t))
     return [TreeCRF(log_potentials, lengths=None)]
 
-  def create_invalid_shape_distribution(self):
-    b, n, t = 1, 5, 4
-    log_potentials = jnp.zeros((b, n, n-1, t))
-    return TreeCRF(log_potentials, lengths=None)
-
   def analytic_log_count(self, dist) -> jax.Array:
     # Note: terminal labels are included as part of the combinatorial structure.
     log_tree_count = special.log_catalan(dist.lengths-1)

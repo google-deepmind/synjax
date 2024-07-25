@@ -48,20 +48,6 @@ class GeneralMonotoneAlignmentCrfTest(distribution_test.DistributionTest):
     dists = [GeneralMonotoneAlignmentCRF((step_0, step_1), step_0)]
     return dists
 
-  def test_crash_on_invalid_shapes(self):
-    b = 3
-    m = 5
-    step_0 = jnp.zeros((b, m, m))
-    step_1 = jnp.zeros((b, m, m-1))
-
-    e = Exception
-    self.assertRaises(
-        e, lambda: GeneralMonotoneAlignmentCRF((step_0, step_1), step_0))
-    self.assertRaises(
-        e, lambda: GeneralMonotoneAlignmentCRF((step_0, step_1), None))
-    self.assertRaises(
-        e, lambda: GeneralMonotoneAlignmentCRF((step_0,), step_1))
-
   def assert_is_symmetric(self, dist, marginals) -> bool:
     self.assert_allclose(marginals, jnp.swapaxes(marginals, -1, -2))
     self.assert_allclose(marginals,

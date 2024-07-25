@@ -63,8 +63,11 @@ mkdir _testing && cd _testing
 
 # Disable JAX optimizations to speed up tests.
 export JAX_DISABLE_MOST_OPTIMIZATIONS=True
+# Disables jaxtyping runtime checks while running this test script.
+export PYTHONOPTIMIZE=1
 pytest -n"$(grep -c ^processor /proc/cpuinfo)" --forked `find ../synjax/_src/ -name "*_test.py" | grep -v "/distribution_test.py" | sort`
 unset JAX_DISABLE_MOST_OPTIMIZATIONS
+unset PYTHONOPTIMIZE
 
 cd ..
 

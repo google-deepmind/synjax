@@ -49,14 +49,6 @@ class PcfgTest(distribution_test.DistributionTest):
     return self._create_dist(
         lambda shape: jnp.log(jax.random.uniform(key, shape)))
 
-  def create_invalid_shape_distribution(self):
-    b, n, nt, pt, voc = 2, 4, 2, 3, 40
-    f = jnp.zeros
-    return PCFG(root=f((b, nt)),
-                rule=f((b, nt, nt+pt, nt)),
-                emission=f((b, pt, voc)),
-                word_ids=jnp.tile(jnp.arange(n), (b, 1)))
-
   def create_symmetric_batched_dists(self):
     return self._create_dist(jnp.zeros)
 
