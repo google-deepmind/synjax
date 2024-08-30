@@ -301,7 +301,7 @@ def straight_through_replace(differentiable_input, non_differentiable_output):
     raise ValueError("Shapes for straight-through replacement don't match.")
   return tadd(jax.lax.stop_gradient(tsub(non_differentiable_output,
                                          differentiable_input)),
-              non_differentiable_output)
+              differentiable_input)
 
 
 def sparsemax(x: Array, axis: Union[int, Shape] = -1) -> Array:

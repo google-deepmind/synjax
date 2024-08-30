@@ -161,7 +161,13 @@ class MaxSemiring(Semiring):
     def _sum_jvp(primals, tangents):
       a, = primals
       a_dot, = tangents
-      selection = self._one_hot_selection(a, axis)
+      if self.smoothing == "st-softmax":
+        # This is a special case because - gradient of
+        # special.straight_through_replace is correctly defined, but not used
+        # here because we are overriding the gradient with defjvp.
+        selection = jax.nn.softmax(a / self.temperature, axis=axis)
+      else:
+        selection = self._one_hot_selection(a, axis)
       return jnp.sum(selection * a, axis), jnp.sum(selection * a_dot, axis)
     return _sum(a)
 
