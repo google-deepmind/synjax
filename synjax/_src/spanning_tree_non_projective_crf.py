@@ -199,8 +199,8 @@ class SpanningTreeNonProjectiveCRF(Distribution):
     beam_state, logprobs, gumbels = special.vmap_ndim(
         lambda rng, lp: autoregressive_decoding.stochastic_beam_search(
             key=rng,
-            init_state=State.initial(lp,
-                                     single_root_edge=self.single_root_edge),
+            init_state=State.initial(
+                lp, single_root_edge=self.single_root_edge),
             max_length=self.max_nodes-1,
             k=k), self.batch_ndim
         )(jax.random.split(key, self.batch_shape),

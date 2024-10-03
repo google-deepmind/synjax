@@ -20,6 +20,7 @@ from typing import Any, Tuple
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from synjax._src.constants import INF  # pylint: disable=g-importing-member
 
 
 Array = jax.Array
@@ -89,7 +90,7 @@ def beam_search(init_state: State, max_length: int, k: int,
 def stochastic_beam_search(
     key: KeyArray, init_state: State, max_length: int, k: int, unroll: int = 1
     ) -> Tuple[State, Array, Array]:
-  a = jax.eval_shape(init_state.logprobs).shape[-1]
+  a = init_state.logprobs().shape[-1]
   sbs = _GeneralStochasticBeamSearch(k=k, a=a, is_regular_beam_search=False,
                                      unroll=unroll)
   return sbs.sample(key=key, init_state=init_state, max_length=max_length)
@@ -185,6 +186,7 @@ def _gumbel_with_maximum(key: KeyArray,
   """  # pylint: disable=line-too-long
   # Gumbels with location (e.g. `log_probabilities`, G_\phi_{S`} in the paper).
   gumbels = location + jax.random.gumbel(key, location.shape)
+  gumbels = jnp.where(jnp.isneginf(gumbels), -INF, gumbels)
 
   # pylint: disable=invalid-name
   # Use equations (23) and (24) in Appendix B.3.
