@@ -143,6 +143,48 @@ class GeneralTest(parameterized.TestCase):
     self.assert_allclose(g1, g2)
     self.assertGreater(jnp.count_nonzero(g1), 2)
 
+  def test_posterior_gumbel(self):
+    logits = jax.random.normal(jax.random.PRNGKey(0), (7, 10, 5))
+    sample = special.sample_one_hot(logits, key=jax.random.PRNGKey(0))
+    noises = special.posterior_gumbel(logits, sample, key=jax.random.PRNGKey(1))
+    sample1 = special.max_one_hot(noises, axis=-1)
+    self.assert_allclose(sample, sample1)
+
+  def test_gapped_straight_through(self):
+    logits = jax.random.normal(jax.random.PRNGKey(0), (7, 10, 50))
+    sample_soft = special.gapped_straight_through(
+        logits, key=jax.random.PRNGKey(0), gap=1., hard_sample=False)
+    self.assertEqual(sample_soft.shape, logits.shape)
+    sample_hard = special.gapped_straight_through(
+        logits, key=jax.random.PRNGKey(0), gap=1., hard_sample=True)
+    self.assertTrue(jnp.allclose(jnp.argmax(sample_soft, axis=-1),
+                                 jnp.argmax(sample_hard, axis=-1)))
+
+  def test_gumbel_rao(self):
+    logits = jax.random.normal(jax.random.PRNGKey(0), (7, 10, 5))
+    sample = special.gumbel_rao(logits, key=jax.random.PRNGKey(0), k=10)
+    self.assertEqual(sample.shape, logits.shape)
+    def f(logits):
+      return (special.gumbel_rao(logits, key=jax.random.PRNGKey(0),
+                                 k=10)**2).sum()
+    gradient = jax.grad(f)(logits)
+    self.assertEqual(gradient.shape, logits.shape)
+    self.assertFalse(jnp.all(gradient == 0))
+
+  def test_straight_through_replace_vjp_and_jvp_agree(self):
+    def f(x):
+      return special.straight_through_replace(x, jnp.clip(x, -3, 2))**2
+    x = -jnp.float32(jnp.inf)
+    self.assertTrue(jnp.allclose(jax.jacrev(f)(x), jax.jacfwd(f)(x)))
+
+  def test_straight_through_replace_handles_inf(self):
+    def f(x):
+      return special.straight_through_replace(x, jnp.clip(x, -3, 2))**2
+    x = -jnp.float32(jnp.inf)
+    value, grad = jax.value_and_grad(f)(x)
+    self.assertEqual(value, 9.)
+    self.assertTrue(jnp.isfinite(grad))
+
 
 if __name__ == "__main__":
   absltest.main()

@@ -33,6 +33,9 @@ SpanningTreeNonProjectiveCRF = (
     spanning_tree_non_projective_crf.SpanningTreeNonProjectiveCRF)
 
 
+jax.config.update("jax_debug_nans", True)
+
+
 class SpanningTreeNonProjectiveCRFTest(
     distribution_test.DistributionTest):
 

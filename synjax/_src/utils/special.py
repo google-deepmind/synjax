@@ -70,38 +70,14 @@ def safe_log(x: Array) -> Array:
   # pytype: enable=bad-return-type
 
 
-def bound(x: Array, min_val: float, max_val: float) -> Array:
-  """Clipping that has a margin loss gradients for elements that are clipped.
+# pylint: disable=redefined-builtin
+def safe_clip(x: Array, min: float, max: float) -> Array:
+  return straight_through_replace(x, jnp.clip(x, min, max))
 
-  This is inspired Donahue et al (2019) who used an additional margin loss to
-  penalize elements that are out of the specified range. This implementation
-  differs in having gradients for the margin loss directly built-in so that
-  the user does not have to manually pass the loss through the whole network.
 
-  Args:
-    x: Input array.
-    min_val: Minimum value for the output array.
-    max_val: Maximum value for the output array.
-  Returns:
-    Clipped array.
-
-  References:
-    Donahue et al (2019) -- Piano Genie -- Equation (1).
-    https://arxiv.org/pdf/1810.05246#page=3
-  """
-  @jax.custom_vjp
-  def f(y):
-    return jnp.clip(y, min_val, max_val)
-
-  def f_fwd(y):
-    return f(y), y
-
-  def f_bwd(res, g):
-    y = res
-    return jnp.where(y < min_val, -1, jnp.where(y > max_val, 1, g)),
-
-  f.defvjp(f_fwd, f_bwd)
-  return f(x)
+def safe_log_softmax(
+    log_potentials: Array, axis: int|tuple[int, ...] = -1) -> Array:
+  return jax.nn.log_softmax(safe_clip(log_potentials, -INF, INF), axis=axis)
 
 
 InversionMethod = Literal["solve", "qr"]
@@ -218,30 +194,300 @@ def _tpu_take(x: Array, indices: Array, axis: int = -1) -> Array:
 ############################################################################
 
 
-def max_one_hot(x: Array, axis: Union[int, Tuple[int, ...]]) -> Array:
-  return (x == x.max(axis=axis, keepdims=True)).astype(jnp.float32)
+def max_one_hot(x: Array, axis: Union[int, Tuple[int, ...]] = -1, *,
+                straight_through: bool = False) -> Array:
+  y = (x == x.max(axis=axis, keepdims=True)).astype(jnp.float32)
+  if straight_through:
+    y = straight_through_replace(x, y)
+  return y
 
 
-def sample_one_hot(logits: Array, *, key: Array,
-                   axis: Union[int, Tuple[int, ...]] = -1,
-                   relaxation: Optional[Literal["Gumbel-Softmax",
-                                                "ST-Gumbel-Softmax"]]) -> Array:
-  """Returns sampled vector from the input for a given key."""
-  noise = jax.random.gumbel(key, logits.shape)
-  perturbed = logits + noise
-  if relaxation == "ST-Gumbel-Softmax":
-    # ST-Gumbel-Softmax
-    soft = jax.nn.softmax(perturbed, axis=axis)
-    hard = max_one_hot(perturbed, axis)
-    return straight_through_replace(soft, hard)
-  elif relaxation == "Gumbel-Softmax":
-    # Gumbel-Softmax
-    return jax.nn.softmax(perturbed, axis=axis)
-  elif relaxation is None:
-    # Gumbel-Max
-    return max_one_hot(perturbed, axis)
+def reinmax_sample(
+    log_potential: Array, *, key: Array, temperature: float = 1.0,
+    axis: Union[int, Tuple[int, ...]] = -1) -> Array:
+  """ReinMax -- discrete sampling that has 2nd order approximation of gradients.
+
+  ReinMax was published in Liu et al (2023) as an alternative to
+  Straight-Through and Streaight-Through-Gumbel-Softmax sampling.
+  Forward pass will provide a regular one-hot sample, but the backward pass will
+  have gradients that are having a higher order approximation than the regular
+  Straight-Through estimator.
+
+  Args:
+    log_potential: Log-potentials to sample from.
+    key: Random key.
+    temperature: Temperature for smoothing the gradients. Temperature has the
+      opposite effect compared to ST-Gumbel. In ReinMax increasing temperature
+      makes gradient estimates more smooth.
+    axis: Axis over which to sample.
+  Returns:
+    Sampled one-hot vector that will have 2nd order approximate gradients.
+
+  References:
+    Liu et al 2023
+    Bridging Discrete and Backpropagation: Straight-Through and Beyond
+    https://openreview.net/pdf?id=mayAyPrhJI
+  """
+  sample = sample_one_hot(log_potential, key=key, relaxation=None, axis=axis)
+  softmax = functools.partial(jax.nn.softmax, axis=axis)
+  p0 = softmax(log_potential)
+  p0t = softmax(jnp.log(p0)/temperature)
+  p1 = softmax(straight_through_replace(log_potential, jnp.log((sample+p0t)/2)))
+  return straight_through_replace(2*p1 - p0/2, sample)
+
+
+def gapped_straight_through(
+    logits: jax.Array, *, key: jax.Array, axis: int|tuple[int, ...] = -1,
+    temperature: float = 1.0, gap: float = 1., hard_sample: bool = True,
+    ) -> jax.Array:
+  """Gapped straight-through estimator.
+
+  Similar to ST-Gumbel-Softmax but with a deterministic noise given the sampled
+  one-hot vector. This should decrease the variance in the estimator.
+
+  Args:
+    logits: Logits of the distribution to sample from.
+    key: Random key.
+    axis: Axis over which to sample.
+    temperature: Temperature for smoothing the gradients.
+    gap: Gap to add to the logits when computing the deterministic perturbation.
+    hard_sample: If True (default) returns the hard one-hot sample, if False
+      returns the perturbed logits.
+  Returns:
+    Sampled one-hot vector that will be differentiable via Gapped ST estimator.
+
+  Refernces:
+    Fan et al (2022) -- https://proceedings.mlr.press/v162/fan22a/fan22a.pdf
+  """
+  logits = jax.nn.log_softmax(logits, axis=axis)
+  sample = sample_one_hot(logits, key=key, relaxation=None, axis=axis)
+  max_logits = jnp.max(logits, axis=axis, keepdims=True)
+  # Adding m1 perturbation moves sampled logit up to be the highest score.
+  m1 = (max_logits - logits)*sample
+  # Subtracting m2 moves non-sampled ones lower than the sampled by a margin.
+  m2 = jax.nn.relu(logits - max_logits + gap) * (1-sample)
+  perturbation = jax.lax.stop_gradient(m1 - m2)
+  soft_sample = tempered_softmax(
+      logits + perturbation, temperature=temperature, axis=axis)
+  if hard_sample:
+    return straight_through_replace(soft_sample, sample)
   else:
-    raise NotImplementedError
+    return soft_sample
+
+
+def zgr(
+    logits: jax.Array, *, key: jax.Array, axis: int|tuple[int, ...] = -1
+    ) -> jax.Array:
+  """Differentiable ZGR sampling from Shekhovtsov (2023).
+
+  Args:
+    logits: Logits of the distribution to sample from.
+    key: Random key.
+    axis: Axis over which to sample.
+  Returns:
+    Sampled one-hot vector that will be differentiable via ZGR estimator.
+
+  It is equivalent to 1/2 of combination of straigh-trough estimator and
+  DARN estimator (Gregor et al, 2014). It is also equivalent to Gumbel-Rao
+  estimator (Paulus et al, 2021) when temperature approaches 0.
+
+  References:
+    Shekhovtsov (2023) -- https://openreview.net/pdf?id=9GjM8UzCYN
+    Shekhovtsov implementation https://github.com/shekhovt/ZGR/blob/main/zgr.py
+    Gregor et al (2014) https://proceedings.mlr.press/v32/gregor14.pdf
+    Paulus et al (2021) -- https://openreview.net/pdf?id=Mk6PZtgAgfq
+  """
+  logp = jax.nn.log_softmax(logits, axis=axis)  # (..., d)
+  p = jnp.exp(logp)  # (..., d)
+  x = sample_one_hot(logp, axis=axis, key=key, relaxation=None)  # (..., d)
+  logpx = (logp*x).sum(axis, keepdims=True)  # (... , 1) -- log probability of x
+  dx_re = jax.lax.stop_gradient(x - p) * logpx  # (..., d)
+  dx_st = p  # (..., d)
+  dx = (dx_st + dx_re) / 2
+  return x + (dx - jax.lax.stop_gradient(dx))
+
+
+def zgr_binary(logits: jax.Array, *, key: jax.Array) -> jax.Array:
+  """Differentiable sampling from Shekhovtsov (2023) for binary random vars.
+
+  Args:
+    logits: Logits of the distribution to sample from.
+    key: Random key.
+  Returns:
+    Sampled binary values that will be differentiable via ZGR-binary estimator.
+
+  ZGR specialized for binary random variables. In that special case this
+  function is equivalent to 1/2 DARN estimator (Gregor et al, 2014) and to
+  Gumbel-Rao estimator (Paulus et al, 2021) when temperature approaches 0.
+
+  References:
+    Shekhovtsov (2023) -- https://openreview.net/pdf?id=9GjM8UzCYN
+    Shekhovtsov implementation https://github.com/shekhovt/ZGR/blob/main/zgr.py
+    Gregor et al (2014) https://proceedings.mlr.press/v32/gregor14.pdf
+    Paulus et al (2021) -- https://openreview.net/pdf?id=Mk6PZtgAgfq
+  """
+  p = jax.nn.sigmoid(logits)
+  b = jax.random.bernoulli(key, p)
+  jacobian = (b*(1-p)+(1-b)*p)/2
+  sg = jax.lax.stop_gradient
+  return b + sg(jacobian)*(logits - sg(logits))
+
+
+def tempered_softmax(
+    logits: jax.Array, *, temperature: float, axis: int|tuple[int, ...]
+    ) -> jax.Array:
+  """Softmax with temperature parameter."""
+  return jax.nn.softmax(logits/temperature, axis=axis)
+
+
+def posterior_gumbel(
+    location: jax.Array, sample: jax.Array, *, key: jax.Array,
+    axis: int|tuple[int, ...] = -1) -> jax.Array:
+  """Samples a set of gumbels that produces the target sample given the logits.
+
+  This function corresponds to Equation 9 from Paulus et al 2022.
+
+  Args:
+    location: Logits of the distribution to sample from.
+    sample: Target one-hot sample for which returned gumbels should match.
+    key: Random key.
+    axis: Axis over which categorical distribution is defined.
+  Returns:
+    Gumbel noise that corresponds to the provided input sample. Note that these
+    Gumbels are with their location. If you want them without location
+    (i.e. location=0) you need to substract the provided location.
+
+
+  References:
+    Paulus et al 2021: https://openreview.net/pdf?id=Mk6PZtgAgfq
+  """
+  assert location.shape == sample.shape
+  # pylint: disable=invalid-name
+  logZ = jax.nn.logsumexp(location, axis=axis, keepdims=True)
+  E = jax.random.exponential(key, location.shape)
+  Ei = (sample * E).sum(axis=axis, keepdims=True)
+  # pylint: enable=invalid-name
+  return jnp.where(
+      sample, -jnp.log(Ei) + logZ,
+      -jnp.logaddexp(jnp.log(E)-location, jnp.log(Ei)-logZ))
+
+
+def gumbel_rao(
+    logits: jax.Array, *, key: jax.Array, k: int, temperature: float = 1.,
+    axis: int|tuple[int, ...] = -1, use_scan: bool = False) -> jax.Array:
+  """Differentiable Gumbel-Rao sampling.
+
+  Args:
+    logits: Logits of the distribution to sample from.
+    key: Random key.
+    k: Number of samples to take.
+    temperature: Temperature for smoothing the gradients.
+    axis: Axis over which to sample.
+    use_scan: If True (default) uses a more memory efficient implementation.
+        If False it is parallelized over all samples but less memory efficient.
+  Returns:
+    Sampled one-hot vector which is differentiable via Gumbel-Rao estimator.
+
+  This gradient estimator is equivalent to Straight-Trough Gumbel-Softmax
+  for k=1. For larger k it should decrease the variance of gradient estimator
+  (but not the bias). This idea was published by Paulus et al (2020). The
+  implementation here loosely follows Appendix A of arXiv version of the paper
+  that is slightly different than the OpenReview one.
+
+  Reference:
+    Paulus et al (2020) -- https://arxiv.org/pdf/2010.04838#page=12
+  """
+  @jax.custom_vjp
+  def _gumbel_rao_core(logits, key):
+    key_fwd, _ = jax.random.split(key)
+    return sample_one_hot(logits, key=key_fwd, relaxation=None, axis=axis)
+
+  def _gumbel_rao_fwd(logits: jax.Array, key: jax.Array):
+    return _gumbel_rao_core(logits, key), (logits, key)
+
+  def _gumbel_rao_bwd(res, g):
+    logits, key = res
+    key_fwd, key_bwd = jax.random.split(key)
+    sample = sample_one_hot(logits, key=key_fwd, relaxation=None, axis=axis)
+    def single_gumbel(acc, akey):
+      gumbels = posterior_gumbel(logits, sample=sample, key=akey, axis=axis)
+      t_softmax = functools.partial(
+          tempered_softmax, temperature=temperature, axis=axis)
+      grad = jax.vjp(t_softmax, logits + gumbels)[1](g)[0]
+      return acc+grad / k, None
+    keys_bwd = jax.random.split(key_bwd, k)
+    if use_scan:
+      logit_grad = jax.lax.scan(
+          jax.remat(single_gumbel), jnp.zeros_like(logits), keys_bwd)[0]
+    else:
+      logit_grad = jax.vmap(
+          functools.partial(single_gumbel, 0))(keys_bwd)[0].sum(0)
+    return logit_grad, None
+
+  _gumbel_rao_core.defvjp(_gumbel_rao_fwd, _gumbel_rao_bwd)
+
+  return _gumbel_rao_core(logits, key)
+
+
+def sample_one_hot(
+    log_potential: Array, *, key: Array, axis: Union[int, Tuple[int, ...]] = -1,
+    temperature: float = 1.0, noise_scale: float = 1.0,
+    relaxation: Optional[str] = None) -> Array:
+  """Returns sampled vector from the input for a given key.
+
+  Args:
+    log_potential: Log-potentials to sample from.
+    key: Random key.
+    axis: Axis over which to sample.
+    temperature: Temperature for smoothing (or sharpening) the soft samples.
+    noise_scale: Scale of the noise to add to the log-potentials.
+    relaxation: Relaxation to apply to the sampling so that sampling is
+      differentiable. The available options are:
+      - None: If nothing is provided (the default setting) non-differentiable
+          1-hot sample is returned.
+      - Gumbel-Softmax: Gumbel-Softmax sampling.
+      - ST-Gumbel-Softmax: Straight-Through Gumbel-Softmax sampling.
+      - ST-Argmax: Straight-Through Argmax sampling.
+      - ReinMax: ReinMax sampling.
+      - Gumbel-Rao-X : Gumbel-Rao sampling with X Gumbel noises for computing
+          the posterior. E.g. Gumbel-Rao-128 for 128 Gumbel noises.
+          Gumbel-Rao-1 is equivalent to ST-Gumbel-Softmax.
+      - ZGR: ZGR sampling.
+  Returns:
+    One-hot sample from the input distribution (unless Gumbel-Softmax relaxation
+    is used in which case it is a soft sample).
+  """
+  # Normalization is not important for Gumbel trick, but it is for temperature.
+  log_potential = jax.nn.log_softmax(log_potential, axis=axis)  # Normalization.
+  noise = jax.random.gumbel(key, log_potential.shape) * noise_scale
+
+  t_softmax = functools.partial(
+      tempered_softmax, temperature=temperature, axis=axis)
+
+  if relaxation is None:  # Standard Gumbel-Argmax trick with no gradients.
+    return max_one_hot(t_softmax(log_potential+noise), axis,
+                       straight_through=False)
+  elif relaxation == "ST-Gumbel-Softmax":
+    return max_one_hot(t_softmax(log_potential+noise), axis,
+                       straight_through=True)
+  elif relaxation == "Gumbel-Softmax":
+    return t_softmax(log_potential+noise)
+  elif relaxation == "Gapped-ST":
+    return gapped_straight_through(
+        log_potential, key=key, axis=axis, temperature=temperature)
+  elif relaxation == "ZGR":
+    return zgr(log_potential, key=key, axis=axis)
+  elif relaxation.startswith("Gumbel-Rao-"):
+    k = int(relaxation.split("-")[-1])
+    return gumbel_rao(
+        log_potential, key=key, k=k, temperature=temperature, axis=axis)
+  elif relaxation == "ReinMax":
+    return reinmax_sample(
+        log_potential, temperature=temperature, key=key, axis=axis)
+  elif relaxation == "ST-Argmax":
+    return max_one_hot(t_softmax(log_potential), axis, straight_through=True)
+  else:
+    raise NotImplementedError(f"Unknown relaxation: {relaxation}")
 
 
 ############################################################################
@@ -294,14 +540,24 @@ def tscale_inexact_arrays(scalar: Union[float, Array], tree):
 ############################################################################
 
 
+@jax.custom_jvp
 def straight_through_replace(differentiable_input, non_differentiable_output):
   """Replaces value and passes trough the gradient."""
-  if jtu.tree_map(lambda x: x.shape, differentiable_input) != jtu.tree_map(
-      lambda x: x.shape, non_differentiable_output):
-    raise ValueError("Shapes for straight-through replacement don't match.")
-  return tadd(jax.lax.stop_gradient(tsub(non_differentiable_output,
-                                         differentiable_input)),
-              differentiable_input)
+  shape_input = jtu.tree_map(lambda x: x.shape, differentiable_input)
+  shape_output = jtu.tree_map(lambda x: x.shape, non_differentiable_output)
+  if shape_input != shape_output:
+    raise ValueError(
+        f"Shapes for straight-through replacement of input {shape_input} "
+        f"and output {shape_output} don't match.")
+  return non_differentiable_output
+
+
+def _straight_through_replace_jvp(primals, tangents):
+  (tangent_of_differentiable_input, _) = tangents
+  return straight_through_replace(*primals), tangent_of_differentiable_input
+
+
+straight_through_replace.defjvp(_straight_through_replace_jvp)
 
 
 def sparsemax(x: Array, axis: Union[int, Shape] = -1) -> Array:

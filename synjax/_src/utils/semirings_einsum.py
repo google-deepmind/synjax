@@ -25,7 +25,9 @@ import collections
 import functools
 import inspect
 import operator
-from typing import Sequence, Tuple, FrozenSet, List, Optional, Any, cast
+from typing import (
+    Any, FrozenSet, Iterable, List, Optional, Sequence, Tuple, TypeVar, cast)
+
 import jax
 from jax import core
 import jax.numpy as jnp
@@ -35,10 +37,26 @@ import opt_einsum
 __all__ = ["einsum_generalized"]
 
 
+T1 = TypeVar('T1')
+T2 = TypeVar('T2')
+
+
+def unzip2(
+    xys: Iterable[tuple[T1, T2]],
+) -> tuple[tuple[T1, ...], tuple[T2, ...]]:
+  """Unzip a sequence of tuples into two separate tuples."""
+  xs: list[T1] = []
+  ys: list[T2] = []
+  for x, y in xys:
+    xs.append(x)
+    ys.append(y)
+  return tuple(xs), tuple(ys)
+
+
 # Taken from jax._src.lax.lax
 def _delta(dtype, shape, axes):
   """This utility function exists for creating Kronecker delta arrays."""
-  axes = jax.util.safe_map(int, axes)
+  axes = list(map(int, axes))
   dtype = jax.dtypes.canonicalize_dtype(dtype)
   base_shape = tuple(np.take(shape, axes))  # type: ignore[arg-type]
   iotas = [jax.lax.broadcasted_iota(jnp.uint32, base_shape, i)
@@ -83,8 +101,6 @@ def _einsum(operands: List[jnp.ndarray],
   Returns:
     The result of a semi-ring einsum.
   """
-  unzip2 = jax.util.unzip2
-
   # NOTE: In the original implementation from jax._src.numpy.lax_numpy the types
   # are promoted using operands = list(_promote_dtypes(*operands)) where
   # _promote_dtypes comes from jax._src.numpy.util. It is removed here because

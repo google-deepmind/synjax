@@ -167,9 +167,7 @@ class SpanningTreeNonProjectiveCRF(Distribution):
   def log_partition(self) -> Float[Array, "*batch"]:
     log_potentials, correction = _optionally_shift_log_potentials(
         self._padded_log_potentials)
-    log_potentials = special.bound(log_potentials,
-                                   get_config().mtt_min_log_potential,
-                                   get_config().mtt_max_log_potential)
+    log_potentials = _clip_for_mtt(log_potentials)
     laplacian_hat = _construct_laplacian_hat(log_potentials,
                                              self.single_root_edge)
     return correction + _custom_slog_det(laplacian_hat)[1]
@@ -271,7 +269,7 @@ class State(autoregressive_decoding.State):
   @typed
   def logprobs(self) -> Float[Array, "n"]:
     marginals = _marginals_with_given_laplacian_invt(
-        jnp.log(self.potentials), self.laplacian_invt,
+        special.safe_log(self.potentials), self.laplacian_invt,
         single_root_edge=self.single_root_edge)
     return special.safe_log(marginals[:, self.j])
 
@@ -293,7 +291,7 @@ class State(autoregressive_decoding.State):
     constrained_incoming = jax.nn.one_hot(i, potentials_old.shape[-1])
     potentials = potentials_old.at[..., j].set(constrained_incoming)
 
-    laplacian = _construct_laplacian_hat(jnp.log(potentials),
+    laplacian = _construct_laplacian_hat(special.safe_log(potentials),
                                          self.single_root_edge)
 
     uj = laplacian[:, j - 1] - laplacian_old[:, j - 1]
@@ -313,9 +311,7 @@ class State(autoregressive_decoding.State):
               ) -> State:
     empty_sample = jnp.empty(log_potentials.shape[-1], dtype=jnp.int32)
     log_potentials, _ = _optionally_shift_log_potentials(log_potentials)
-    log_potentials = special.bound(log_potentials,
-                                   get_config().mtt_min_log_potential,
-                                   get_config().mtt_max_log_potential)
+    log_potentials = _clip_for_mtt(log_potentials)
     laplacian = _construct_laplacian_hat(log_potentials,
                                          single_root_edge=single_root_edge)
     laplacian_invt = jnp.linalg.inv(laplacian).T
@@ -351,6 +347,13 @@ def _construct_laplacian_hat(
     return laplacian(cut(potentials)).at[..., 0, :].set(potentials[..., 0, 1:])
   else:
     return cut(laplacian(potentials))
+
+
+def _clip_for_mtt(log_potentials: Float[Array, "..."]) -> Float[Array, "..."]:
+  return special.safe_clip(
+      log_potentials,
+      min=get_config().mtt_min_log_potential,
+      max=get_config().mtt_max_log_potential)
 
 
 @typed
@@ -394,7 +397,7 @@ def sample_wilson_numpy_callback(
   f = lambda *x: deptree_non_proj_wilson_sampling.vectorized_sample_wilson(
       *jtu.tree_map(np.asarray, x)).astype(jnp.int32)
   trees = jax.pure_callback(f, result_shape, log_potentials, lengths,
-                            single_root_edge, vectorized=True)
+                            single_root_edge, vmap_method="legacy_vectorized")
   # pytype: disable=bad-return-type
   return (_to_adjacency_matrix(trees, lengths),
           lambda g: (jnp.zeros_like(log_potentials), None, None, None))
@@ -412,7 +415,8 @@ def mst_numpy_callback(log_potentials: jax.Array, lengths: jax.Array,
   trees = jax.pure_callback(
       lambda *x: deptree_non_proj_argmax.vectorized_mst(
           *jtu.tree_map(np.asarray, x)).astype(jnp.int32),
-      result_shape, log_potentials, lengths, single_root_edge, vectorized=True)
+      result_shape, log_potentials, lengths, single_root_edge,
+      vmap_method="legacy_vectorized")
   # pytype: disable=bad-return-type
   return (_to_adjacency_matrix(trees, lengths),
           lambda g: (jnp.zeros_like(log_potentials), None, None))
