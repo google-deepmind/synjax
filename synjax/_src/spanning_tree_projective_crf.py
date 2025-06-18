@@ -35,7 +35,7 @@ Chart = chart_struct.Chart
 class SpanningTreeProjectiveCRF(SemiringDistribution):
   """Distribution representing projective dependency trees."""
 
-  single_root_edge: bool = eqx.static_field()
+  single_root_edge: bool = eqx.field(static=True)
   lengths: Int32[Array, "*batch"]
 
   @typed

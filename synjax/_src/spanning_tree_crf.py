@@ -30,9 +30,9 @@ from synjax._src.typing import Shape, Key, typed
 class SpanningTreeCRF(Distribution):
   """Unified interface to all spanning tree distributions."""
 
-  directed: bool = eqx.static_field()
-  projective: bool = eqx.static_field()
-  single_root_edge: bool = eqx.static_field()
+  directed: bool = eqx.field(static=True)
+  projective: bool = eqx.field(static=True)
+  single_root_edge: bool = eqx.field(static=True)
   _dist: Union[SpanningTreeNonProjectiveCRF, SpanningTreeProjectiveCRF]
 
   @typed

@@ -47,7 +47,7 @@ class Distribution(eqx.Module):
   """Abstract base class for all distributions."""
 
   log_potentials: Optional[PyTree[Float[Array, "..."]]]
-  struct_is_isomorphic_to_params: bool = eqx.static_field(default=True)
+  struct_is_isomorphic_to_params: bool = eqx.field(static=True, default=True)
 
   @typed
   def log_count(self, **kwargs) -> Float[Array, "*batch"]:

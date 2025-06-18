@@ -68,10 +68,10 @@ class GeneralizedTensorDecompositionPCFG(SemiringDistribution):
     Nederhof and Satta 2003: https://aclanthology.org/W03-3016.pdf
   """  # pylint: disable=line-too-long
 
-  size_sentence: int = eqx.static_field()
-  size_nonterminals: int = eqx.static_field()
-  size_preterminals: int = eqx.static_field()
-  size_rank: int = eqx.static_field()
+  size_sentence: int = eqx.field(static=True)
+  size_nonterminals: int = eqx.field(static=True)
+  size_preterminals: int = eqx.field(static=True)
+  size_rank: int = eqx.field(static=True)
 
   preterminal_scores: Float[Array, "*batch n pt"]
   root: Float[Array, "*batch nt"]

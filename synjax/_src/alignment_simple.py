@@ -70,7 +70,7 @@ class AlignmentCRF(Distribution):
   lengths_rows: Int32[Array, "*batch"]
   lengths_cols: Int32[Array, "*batch"]
   _dist: Optional[GeneralMonotoneAlignmentCRF]
-  alignment_type: str = eqx.static_field()
+  alignment_type: str = eqx.field(static=True)
 
   @typed
   def __init__(self, log_potentials: Float[Array, "*batch row col"], *,

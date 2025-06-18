@@ -84,7 +84,7 @@ def _custom_slog_det(
 class SpanningTreeNonProjectiveCRF(Distribution):
   """Distribution representing non-projective dependency trees."""
 
-  single_root_edge: bool = eqx.static_field()
+  single_root_edge: bool = eqx.field(static=True)
   lengths: Int32[Array, "*batch"]
 
   @typed
@@ -264,7 +264,7 @@ class State(autoregressive_decoding.State):
   laplacian_invt: Float[Array, "n-1 n-1"]
   j: Int32[Array, ""]
   sample: Int32[Array, "n"]
-  single_root_edge: bool = eqx.static_field()
+  single_root_edge: bool = eqx.field(static=True)
 
   @typed
   def logprobs(self) -> Float[Array, "n"]:
