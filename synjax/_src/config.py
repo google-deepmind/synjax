@@ -22,7 +22,7 @@ from synjax._src import constants
 
 
 @typed
-@functools.partial(dataclasses.dataclass, frozen=True)
+@functools.partial(dataclasses.dataclass, frozen=True)  # pytype: disable=wrong-keyword-args
 class SynJaxConfig():
   """SynJax configuration."""
 
